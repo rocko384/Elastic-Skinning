@@ -8,6 +8,8 @@ string(REPLACE " " "_" ProjectName ${PROJECT_NAME})
 set(SOURCE
 	"source/main.cpp"
 	"include/util.h"
+	"include/gfxcontext.h"
+	"source/gfxcontext.cpp"
 )
 
 # Add source to this project's executable.
@@ -22,8 +24,9 @@ target_include_directories(
 target_link_libraries(
 	${ProjectName}
 	PUBLIC
-	glm::glm
+	SDL2::SDL2main
 	SDL2::SDL2
+	glm::glm
 	Vulkan::Vulkan
 )
 # TODO: Add tests and install targets if needed.

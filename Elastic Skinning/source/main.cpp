@@ -2,11 +2,17 @@
 //
 
 #include "util.h"
+#include "gfxcontext.h"
 
 using namespace std;
 
-int main()
-{
-	cout << "Hello CMake." << endl;
+int main(int argc, char** argv) {
+	GfxContext context;
+	context.init("Elastic Skinning");
+
+	SDL_Delay(1000);
+
+	context.deinit();
+
 	return 0;
 }

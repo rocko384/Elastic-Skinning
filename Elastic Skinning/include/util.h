@@ -1,8 +1,17 @@
-﻿// Elastic Skinning.h : Include file for standard system include files,
-// or project specific include files.
+﻿#pragma once
 
-#pragma once
+#include <cstdio>
 
-#include <iostream>
+#define LOG(format, ...) \
+	fprintf(stdout, "\33[38;5;75m"); \
+	fprintf(stdout, format, __VA_ARGS__); \
+	fprintf(stdout, "\33[0m");
 
-// TODO: Reference additional headers your program requires here.
+#define LOG_ERROR(format, ...) \
+	fprintf(stderr, "\n\n"); \
+	fprintf(stderr, "\33[38;5;196m"); \
+	fprintf(stderr, "Line: %d\n", __LINE__); \
+	fprintf(stderr, "File: %s\n\n", __FILE__); \
+	fprintf(stderr, format, __VA_ARGS__); \
+	fprintf(stderr, "\n\n"); \
+	fprintf(stderr, "\33[0m");

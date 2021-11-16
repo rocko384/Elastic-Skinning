@@ -7,6 +7,8 @@ project ("Elastic Skinning")
 
 set (CMAKE_CXX_STANDARD 17)
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 # Add dependencies
 find_package(Vulkan REQUIRED FATAL_ERROR)
 add_subdirectory("Dependencies/glm")
