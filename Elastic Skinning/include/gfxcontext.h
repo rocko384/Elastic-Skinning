@@ -8,6 +8,9 @@
 
 #define REQUIRED_VULKAN_EXTENSIONS 
 
+#define REQUIRED_DEVICE_EXTENSIONS \
+	VK_KHR_SWAPCHAIN_EXTENSION_NAME
+
 #define DEBUG_VULKAN_EXTENSIONS \
 	VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 
@@ -30,5 +33,11 @@ private:
 	vk::Instance vulkan_instance;
 	vk::DispatchLoaderDynamic instance_extension_loader;
 	vk::DebugUtilsMessengerEXT debug_messenger;
+	vk::PhysicalDevice primary_physical_device;
+	vk::Device primary_logical_device;
+	vk::Queue primary_queue;
+	vk::Queue present_queue;
+	vk::SurfaceKHR render_surface;
+	vk::SwapchainKHR render_swapchain;
 
 };
