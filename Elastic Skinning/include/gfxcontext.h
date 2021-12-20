@@ -5,6 +5,7 @@
 #include <SDL_vulkan.h>
 
 #include <string>
+#include <vector>
 
 #define REQUIRED_VULKAN_EXTENSIONS 
 
@@ -37,7 +38,13 @@ private:
 	vk::Device primary_logical_device;
 	vk::Queue primary_queue;
 	vk::Queue present_queue;
+
+	// Swapchain context
 	vk::SurfaceKHR render_surface;
 	vk::SwapchainKHR render_swapchain;
+	vk::Format swapchain_format;
+	vk::Extent2D swapchain_extent;
+	std::vector<vk::Image> swapchain_images;
+	std::vector<vk::ImageView> swapchain_image_views;
 
 };

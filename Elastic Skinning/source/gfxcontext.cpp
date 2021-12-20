@@ -2,7 +2,6 @@
 #include "gfxcontext.h"
 
 #include <algorithm>
-#include <vector>
 #include <set>
 #include <optional>
 #include <cstdint>
@@ -474,6 +473,39 @@ void GfxContext::init(const std::string& AppName) {
 
 	render_swapchain = swapchain;
 
+	swapchain_format = bestFormat.format;
+	swapchain_extent = bestExtent;
+
+	swapchain_images = primary_logical_device.getSwapchainImagesKHR(render_swapchain);
+
+	swapchain_image_views.resize(swapchain_images.size());
+
+	for (size_t i = 0; i < swapchain_images.size(); i++) {
+		vk::ImageViewCreateInfo imageViewCreateInfo;
+		imageViewCreateInfo.image = swapchain_images[i];
+		imageViewCreateInfo.viewType = vk::ImageViewType::e2D;
+		imageViewCreateInfo.format = swapchain_format;
+		imageViewCreateInfo.components.r = vk::ComponentSwizzle::eIdentity;
+		imageViewCreateInfo.components.g = vk::ComponentSwizzle::eIdentity;
+		imageViewCreateInfo.components.b = vk::ComponentSwizzle::eIdentity;
+		imageViewCreateInfo.components.a = vk::ComponentSwizzle::eIdentity;
+		imageViewCreateInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
+		imageViewCreateInfo.subresourceRange.levelCount = 1;
+		imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+		imageViewCreateInfo.subresourceRange.layerCount = 1;
+
+		vk::ImageView imageView = primary_logical_device.createImageView(imageViewCreateInfo);
+
+		if (!imageView) {
+			LOG_ERROR("Failed to create swapchain image view");
+			swapchain_image_views.clear();
+			return;
+		}
+
+		swapchain_image_views[i] = imageView;
+	}
+
 	/*
 	* Finish initialization
 	*/
@@ -483,6 +515,12 @@ void GfxContext::init(const std::string& AppName) {
 
 void GfxContext::deinit() {
 	if (is_initialized) {
+		if (!swapchain_image_views.empty()) {
+			for (auto imageView : swapchain_image_views) {
+				primary_logical_device.destroy(imageView);
+			}
+		}
+
 		if (render_swapchain) {
 			primary_logical_device.destroy(render_swapchain);
 		}
