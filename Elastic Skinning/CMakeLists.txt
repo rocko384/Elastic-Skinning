@@ -1,7 +1,7 @@
 ﻿# CMakeList.txt : CMake project for Elastic Skinning, include source and define
 # project specific logic here.
 #
-cmake_minimum_required (VERSION 3.8)
+cmake_minimum_required (VERSION 3.20)
 
 string(REPLACE " " "_" ProjectName ${PROJECT_NAME})
 
@@ -12,8 +12,21 @@ set(SOURCE
 	"source/gfxcontext.cpp"
 )
 
+file(GLOB
+	SHADERS
+	RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+	shaders/*
+)
+
+message(STATUS "Shaders ${SHADERS}")
+
 # Add source to this project's executable.
 add_executable (${ProjectName} ${SOURCE})
+
+compile_shader(${ProjectName}
+	FORMAT bin
+	SOURCES ${SHADERS}
+)
 
 target_include_directories(
 	${ProjectName}
