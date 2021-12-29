@@ -10,6 +10,8 @@ set(SOURCE
 	"include/util.h"
 	"include/gfxcontext.h"
 	"source/gfxcontext.cpp"
+	"include/asset.h"
+	"source/asset.cpp"
 )
 
 file(GLOB

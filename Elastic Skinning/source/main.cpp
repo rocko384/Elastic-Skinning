@@ -2,6 +2,7 @@
 //
 
 #include "util.h"
+#include "asset.h"
 #include "gfxcontext.h"
 
 using namespace std;

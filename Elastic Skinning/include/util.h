@@ -2,6 +2,12 @@
 
 #include <cstdio>
 
+template <typename VALUE_TYPE, typename STATUS_TYPE>
+struct Retval {
+	VALUE_TYPE value;
+	STATUS_TYPE status;
+};
+
 #define LOG(format, ...) \
 	fprintf(stdout, "\33[38;5;75m"); \
 	fprintf(stdout, format, __VA_ARGS__); \
