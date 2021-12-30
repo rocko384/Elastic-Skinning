@@ -1,4 +1,3 @@
-#include "util.h"
 #include "gfxcontext.h"
 
 #include <algorithm>
@@ -380,150 +379,33 @@ void GfxContext::init(const std::string& AppName) {
 
 	/// TODO: Break this out in some way to facilitate dynamic swapchain recreation for window resizing
 
-	auto surfaceCapabilities = primary_physical_device.getSurfaceCapabilitiesKHR(render_surface);
-	auto surfaceFormats = primary_physical_device.getSurfaceFormatsKHR(render_surface);
-	auto surfacePresentModes = primary_physical_device.getSurfacePresentModesKHR(render_surface);
-
-	vk::SurfaceFormatKHR bestFormat = surfaceFormats[0].format;
-
-	for (auto format : surfaceFormats) {
-		if (format.format == vk::Format::eB8G8R8A8Srgb
-			&& format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
-			bestFormat = format;
-			break;
-		}
-	}
-
-	vk::PresentModeKHR bestPresentMode = vk::PresentModeKHR::eFifo;
-
-	for (auto mode : surfacePresentModes) {
-		if (mode == vk::PresentModeKHR::eMailbox) {
-			bestPresentMode = vk::PresentModeKHR::eMailbox;
-			break;
-		}
-	}
-
-	vk::Extent2D bestExtent;
-
-	if (surfaceCapabilities.currentExtent.width != UINT32_MAX) {
-		bestExtent = surfaceCapabilities.currentExtent;
-	}
-	else {
-		int width, height;
-		SDL_Vulkan_GetDrawableSize(window, &width, &height);
-
-		vk::Extent2D actualExtent {
-			static_cast<uint32_t>(width),
-			static_cast<uint32_t>(height)
-		};
-
-		actualExtent.width = std::clamp(
-			actualExtent.width,
-			surfaceCapabilities.minImageExtent.width,
-			surfaceCapabilities.maxImageExtent.width
-		);
-
-		actualExtent.height = std::clamp(
-			actualExtent.height,
-			surfaceCapabilities.minImageExtent.height,
-			surfaceCapabilities.maxImageExtent.height
-		);
-
-		bestExtent = actualExtent;
-	}
-	
-	uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
-	
-	imageCount = std::clamp(imageCount, imageCount, surfaceCapabilities.maxImageCount);
-	
-	vk::SwapchainCreateInfoKHR swapchainCreateInfo;
-	swapchainCreateInfo.surface = render_surface;
-	swapchainCreateInfo.minImageCount = imageCount;
-	swapchainCreateInfo.imageFormat = bestFormat.format;
-	swapchainCreateInfo.imageColorSpace = bestFormat.colorSpace;
-	swapchainCreateInfo.imageExtent = bestExtent;
-	swapchainCreateInfo.imageArrayLayers = 1;
-	swapchainCreateInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
-
 	uint32_t queueFamilyIndices[] = { primaryQueueFamilyIndex.value(), presentQueueFamilyIndex.value() };
 
-	if (primaryQueueFamilyIndex.value() != presentQueueFamilyIndex.value()) {
-		swapchainCreateInfo.imageSharingMode = vk::SharingMode::eConcurrent;
-		swapchainCreateInfo.queueFamilyIndexCount = 2;
-		swapchainCreateInfo.pQueueFamilyIndices = queueFamilyIndices;
-	}
-	else {
-		swapchainCreateInfo.imageSharingMode = vk::SharingMode::eExclusive;
-		swapchainCreateInfo.queueFamilyIndexCount = 0;
-		swapchainCreateInfo.pQueueFamilyIndices = nullptr;
-	}
-
-	swapchainCreateInfo.preTransform = surfaceCapabilities.currentTransform;
-	swapchainCreateInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
-	swapchainCreateInfo.presentMode = bestPresentMode;
-	swapchainCreateInfo.clipped = VK_TRUE;
-	swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
-
-	vk::SwapchainKHR swapchain = primary_logical_device.createSwapchainKHR(swapchainCreateInfo);
+	auto swapchainError = render_swapchain_context.init(window, render_surface, primary_physical_device, primary_logical_device, std::span{queueFamilyIndices});
 	
-	if (!swapchain) {
+	switch (swapchainError) {
+	case SwapchainContext::SwapchainError::FAIL_CREATE_SWAPCHAIN: 
 		LOG_ERROR("Failed to create swapchain");
 		return;
-	}
-
-	render_swapchain = swapchain;
-
-	swapchain_format = bestFormat.format;
-	swapchain_extent = bestExtent;
-
-	swapchain_images = primary_logical_device.getSwapchainImagesKHR(render_swapchain);
-
-	swapchain_image_views.resize(swapchain_images.size());
-
-	for (size_t i = 0; i < swapchain_images.size(); i++) {
-		vk::ImageViewCreateInfo imageViewCreateInfo;
-		imageViewCreateInfo.image = swapchain_images[i];
-		imageViewCreateInfo.viewType = vk::ImageViewType::e2D;
-		imageViewCreateInfo.format = swapchain_format;
-		imageViewCreateInfo.components.r = vk::ComponentSwizzle::eIdentity;
-		imageViewCreateInfo.components.g = vk::ComponentSwizzle::eIdentity;
-		imageViewCreateInfo.components.b = vk::ComponentSwizzle::eIdentity;
-		imageViewCreateInfo.components.a = vk::ComponentSwizzle::eIdentity;
-		imageViewCreateInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-		imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-		imageViewCreateInfo.subresourceRange.levelCount = 1;
-		imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-		imageViewCreateInfo.subresourceRange.layerCount = 1;
-
-		vk::ImageView imageView = primary_logical_device.createImageView(imageViewCreateInfo);
-
-		if (!imageView) {
-			LOG_ERROR("Failed to create swapchain image view");
-			swapchain_image_views.clear();
-			return;
-		}
-
-		swapchain_image_views[i] = imageView;
+		break;
+	case SwapchainContext::SwapchainError::FAIL_CREATE_IMAGE_VIEW:
+		LOG_ERROR("Failed to create swapchain image view");
+		return;
+		break;
+	default:
+		break;
 	}
 
 	/*
 	* Finish initialization
 	*/
 
-	is_initialized = true;
+	is_init = true;
 }
 
 void GfxContext::deinit() {
-	if (is_initialized) {
-		if (!swapchain_image_views.empty()) {
-			for (auto imageView : swapchain_image_views) {
-				primary_logical_device.destroy(imageView);
-			}
-		}
-
-		if (render_swapchain) {
-			primary_logical_device.destroy(render_swapchain);
-		}
+	if (is_initialized()) {
+		render_swapchain_context.deinit();
 
 		if (primary_logical_device) {
 			primary_logical_device.destroy();
@@ -543,5 +425,17 @@ void GfxContext::deinit() {
 		SDL_Quit();
 	}
 
-	is_initialized = false;
+	is_init = false;
+}
+
+vk::ShaderModule GfxContext::create_shader_module(std::filesystem::path path) {
+	return create_shader_module(load_binary_asset(path).value);
+}
+
+vk::ShaderModule GfxContext::create_shader_module(const BinaryBlob& code) {
+	vk::ShaderModuleCreateInfo createInfo;
+	createInfo.codeSize = code.size();
+	createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+	return primary_logical_device.createShaderModule(createInfo);
 }

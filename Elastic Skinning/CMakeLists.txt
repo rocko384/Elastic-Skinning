@@ -12,7 +12,9 @@ set(SOURCE
 	"source/gfxcontext.cpp"
 	"include/asset.h"
 	"source/asset.cpp"
-)
+	"include/swapchaincontext.h"
+	"source/swapchaincontext.cpp"
+ "include/renderer.h" "source/renderer.cpp")
 
 file(GLOB
 	SHADERS

@@ -2,8 +2,8 @@
 
 #include <fstream>
 
-Retval<std::vector<uint8_t>, AssetError> load_binary_asset(std::filesystem::path path) {
-	std::vector<uint8_t> ret{};
+Retval<BinaryBlob, AssetError> load_binary_asset(std::filesystem::path path) {
+	BinaryBlob ret{};
 
 	if (!std::filesystem::exists(path)) {
 		return { ret, AssetError::NOT_FOUND };
