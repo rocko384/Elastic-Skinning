@@ -3,7 +3,7 @@
 #include <array>
 
 Renderer::~Renderer() {
-
+	deinit();
 }
 
 void Renderer::init(GfxContext* Context) {
@@ -18,7 +18,45 @@ void Renderer::init(GfxContext* Context) {
 	}
 
 	context = Context;
-	max_frames_in_flight = context->render_swapchain_context.framebuffers.size();
+
+	/*
+	* Create the swapchain
+	*/
+
+	/// TODO: Break this out in some way to facilitate dynamic swapchain recreation for window resizing
+
+	uint32_t queueFamilyIndices[] = { context->primary_queue_family_index, context->present_queue_family_index };
+
+	auto swapchainError = render_swapchain.init(
+		context->window->window,
+		context->render_surface,
+		context->primary_physical_device,
+		context->primary_logical_device,
+		std::span{ queueFamilyIndices }
+	);
+
+	if (swapchainError != Swapchain::SwapchainError::OK) {
+		LOG_ERROR("Swapchain initialization error");
+
+		switch (swapchainError) {
+		case Swapchain::SwapchainError::FAIL_CREATE_SWAPCHAIN:
+			LOG_ERROR("Failed to create swapchain");
+			return;
+			break;
+		case Swapchain::SwapchainError::FAIL_CREATE_IMAGE_VIEW:
+			LOG_ERROR("Failed to create swapchain image view");
+			return;
+			break;
+		case Swapchain::SwapchainError::FAIL_CREATE_RENDER_PASS:
+			LOG_ERROR("Failed to create swapchain render pass");
+			return;
+			break;
+		default:
+			break;
+		}
+	}
+
+	max_frames_in_flight = render_swapchain.framebuffers.size();
 
 	/*
 	* Create graphics pipeline
@@ -58,14 +96,14 @@ void Renderer::init(GfxContext* Context) {
 	vk::Viewport viewport;
 	viewport.x = 0.0f;
 	viewport.y = 0.0f;
-	viewport.width = context->render_swapchain_context.extent.width;
-	viewport.height = context->render_swapchain_context.extent.height;
+	viewport.width = render_swapchain.extent.width;
+	viewport.height = render_swapchain.extent.height;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
 
 	vk::Rect2D scissor;
 	scissor.offset = vk::Offset2D{ 0, 0 };
-	scissor.extent = context->render_swapchain_context.extent;
+	scissor.extent = render_swapchain.extent;
 
 	vk::PipelineViewportStateCreateInfo viewportStateInfo;
 	viewportStateInfo.viewportCount = 1;
@@ -158,7 +196,7 @@ void Renderer::init(GfxContext* Context) {
 	pipelineInfo.pColorBlendState = &colorBlendInfo;
 	pipelineInfo.pDynamicState = nullptr; // &dynamicStateInfo;
 	pipelineInfo.layout = pipeline_layout;
-	pipelineInfo.renderPass = context->render_swapchain_context.render_pass;
+	pipelineInfo.renderPass = render_swapchain.render_pass;
 	pipelineInfo.subpass = 0;
 	pipelineInfo.basePipelineHandle = nullptr;
 	pipelineInfo.basePipelineIndex = -1;
@@ -197,7 +235,7 @@ void Renderer::init(GfxContext* Context) {
 	vk::CommandBufferAllocateInfo commandBufferInfo;
 	commandBufferInfo.commandPool = command_pool;
 	commandBufferInfo.level = vk::CommandBufferLevel::ePrimary;
-	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(context->render_swapchain_context.framebuffers.size());
+	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(render_swapchain.framebuffers.size());
 
 	render_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
 
@@ -218,10 +256,10 @@ void Renderer::init(GfxContext* Context) {
 		render_command_buffers[i].begin(beginInfo);
 
 		vk::RenderPassBeginInfo renderPassInfo;
-		renderPassInfo.renderPass = context->render_swapchain_context.render_pass;
-		renderPassInfo.framebuffer = context->render_swapchain_context.framebuffers[i];
+		renderPassInfo.renderPass = render_swapchain.render_pass;
+		renderPassInfo.framebuffer = render_swapchain.framebuffers[i];
 		renderPassInfo.renderArea.offset = vk::Offset2D{ 0,0 };
-		renderPassInfo.renderArea.extent = context->render_swapchain_context.extent;
+		renderPassInfo.renderArea.extent = render_swapchain.extent;
 		
 		vk::ClearValue clearColor;
 		clearColor.color.float32 = { { 0.0f, 0.0f, 0.0f, 1.0f } };
@@ -247,7 +285,7 @@ void Renderer::init(GfxContext* Context) {
 	image_available_semaphores.resize(max_frames_in_flight);
 	render_finished_semaphores.resize(max_frames_in_flight);
 	in_flight_fences.resize(max_frames_in_flight);
-	images_in_flight.resize(context->render_swapchain_context.images.size(), {});
+	images_in_flight.resize(render_swapchain.images.size(), {});
 
 	vk::SemaphoreCreateInfo semaphoreInfo;
 	vk::FenceCreateInfo fenceInfo;
@@ -292,6 +330,8 @@ void Renderer::deinit() {
 		context->primary_logical_device.destroy(command_pool);
 		context->primary_logical_device.destroy(pipeline);
 		context->primary_logical_device.destroy(pipeline_layout);
+
+		render_swapchain.deinit();
 	}
 
 	is_init = false;
@@ -303,7 +343,7 @@ void Renderer::draw_frame() {
 	std::array<vk::Fence, 1> currentFences = { in_flight_fences[current_frame] };
 	context->primary_logical_device.waitForFences(currentFences, VK_TRUE, UINT64_MAX);
 
-	uint32_t imageIndex = context->primary_logical_device.acquireNextImageKHR(context->render_swapchain_context.swapchain, UINT64_MAX, image_available_semaphores[current_frame], nullptr);
+	uint32_t imageIndex = context->primary_logical_device.acquireNextImageKHR(render_swapchain.swapchain, UINT64_MAX, image_available_semaphores[current_frame], nullptr);
 
 	if (images_in_flight[imageIndex]) {
 		std::array<vk::Fence, 1> ImageInFlightFences = { images_in_flight[imageIndex] };
@@ -327,7 +367,7 @@ void Renderer::draw_frame() {
 
 	context->primary_queue.submit({ submitInfo }, in_flight_fences[current_frame]);
 
-	vk::SwapchainKHR swapChains[] = { context->render_swapchain_context.swapchain };
+	vk::SwapchainKHR swapChains[] = { render_swapchain.swapchain };
 
 	vk::PresentInfoKHR presentInfo;
 	presentInfo.waitSemaphoreCount = 1;

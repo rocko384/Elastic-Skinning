@@ -366,37 +366,6 @@ void GfxContext::init(Window* Window, const std::string& AppName, const std::str
 	present_queue_family_index = presentQueueFamilyIndex.value();
 
 	/*
-	* Create the swapchain
-	*/
-
-	/// TODO: Break this out in some way to facilitate dynamic swapchain recreation for window resizing
-
-	uint32_t queueFamilyIndices[] = { primaryQueueFamilyIndex.value(), presentQueueFamilyIndex.value() };
-
-	auto swapchainError = render_swapchain_context.init(window->window, render_surface, primary_physical_device, primary_logical_device, std::span{queueFamilyIndices});
-	
-	if (swapchainError != SwapchainContext::SwapchainError::OK) {
-		LOG_ERROR("Swapchain initialization error");
-
-		switch (swapchainError) {
-		case SwapchainContext::SwapchainError::FAIL_CREATE_SWAPCHAIN:
-			LOG_ERROR("Failed to create swapchain");
-			return;
-			break;
-		case SwapchainContext::SwapchainError::FAIL_CREATE_IMAGE_VIEW:
-			LOG_ERROR("Failed to create swapchain image view");
-			return;
-			break;
-		case SwapchainContext::SwapchainError::FAIL_CREATE_RENDER_PASS:
-			LOG_ERROR("Failed to create swapchain render pass");
-			return;
-			break;
-		default:
-			break;
-		}
-	}
-
-	/*
 	* Finish initialization
 	*/
 
@@ -405,7 +374,6 @@ void GfxContext::init(Window* Window, const std::string& AppName, const std::str
 
 void GfxContext::deinit() {
 	if (is_initialized()) {
-		render_swapchain_context.deinit();
 
 		if (primary_logical_device) {
 			primary_logical_device.destroy();

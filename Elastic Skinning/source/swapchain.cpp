@@ -1,8 +1,12 @@
-#include "swapchaincontext.h"
+#include "swapchain.h"
 
 #include <algorithm>
 
-SwapchainContext::SwapchainError SwapchainContext::init(SDL_Window* Window, vk::SurfaceKHR RenderSurface, vk::PhysicalDevice PhysicalDevice, vk::Device LogicalDevice, std::span<uint32_t> QueueFamilyIndices) {
+Swapchain::~Swapchain() {
+	deinit();
+}
+
+Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR RenderSurface, vk::PhysicalDevice PhysicalDevice, vk::Device LogicalDevice, std::span<uint32_t> QueueFamilyIndices) {
 	creator = LogicalDevice;
 	
 	auto surfaceCapabilities = PhysicalDevice.getSurfaceCapabilitiesKHR(RenderSurface);
@@ -214,28 +218,36 @@ SwapchainContext::SwapchainError SwapchainContext::init(SDL_Window* Window, vk::
 	/*
 	* Finish initialization
 	*/
+	
+	is_init = true;
 
 	return SwapchainError::OK;
 }
 
-void SwapchainContext::deinit() {
-	if (!framebuffers.empty()) {
-		for (auto framebuffer : framebuffers) {
-			creator.destroy(framebuffer);
+void Swapchain::deinit() {
+	if (is_initialized()) {
+		if (!framebuffers.empty()) {
+			for (auto framebuffer : framebuffers) {
+				creator.destroy(framebuffer);
+			}
+
+			framebuffers.clear();
+		}
+
+		if (render_pass) {
+			creator.destroy(render_pass);
+		}
+
+		if (!image_views.empty()) {
+			for (auto imageView : image_views) {
+				creator.destroy(imageView);
+			}
+		}
+
+		if (swapchain) {
+			creator.destroy(swapchain);
 		}
 	}
 
-	if (render_pass) {
-		creator.destroy(render_pass);
-	}
-
-	if (!image_views.empty()) {
-		for (auto imageView : image_views) {
-			creator.destroy(imageView);
-		}
-	}
-
-	if (swapchain) {
-		creator.destroy(swapchain);
-	}
+	is_init = false;
 }

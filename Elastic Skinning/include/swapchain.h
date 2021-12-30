@@ -8,7 +8,7 @@
 #include <span>
 #include <cstdint>
 
-struct SwapchainContext {
+struct Swapchain {
 	enum class SwapchainError {
 		OK,
 		FAIL_CREATE_SWAPCHAIN,
@@ -17,8 +17,12 @@ struct SwapchainContext {
 		FAIL_CREATE_FRAMEBUFFER
 	};
 
+	~Swapchain();
+
 	SwapchainError init(SDL_Window* Window, vk::SurfaceKHR RenderSurface, vk::PhysicalDevice PhysicalDevice, vk::Device LogicalDevice, std::span<uint32_t> QueueFamilyIndices);
 	void deinit();
+
+	bool is_initialized() { return is_init; }
 
 	vk::SwapchainKHR swapchain;
 	vk::Format format;
@@ -29,6 +33,8 @@ struct SwapchainContext {
 	std::vector<vk::Framebuffer> framebuffers;
 
 private:
+
+	bool is_init{ false };
 
 	vk::Device creator;
 };

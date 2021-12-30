@@ -2,6 +2,7 @@
 
 #include "util.h"
 #include "gfxcontext.h"
+#include "swapchain.h"
 
 #include <vulkan/vulkan.hpp>
 
@@ -25,6 +26,7 @@ private:
 	bool is_init{ false };
 
 	GfxContext* context{ nullptr };
+	Swapchain render_swapchain;
 
 	vk::PipelineLayout pipeline_layout;
 	vk::Pipeline pipeline;

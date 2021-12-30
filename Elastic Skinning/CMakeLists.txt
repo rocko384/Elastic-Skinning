@@ -12,8 +12,8 @@ set(SOURCE
 	"source/gfxcontext.cpp"
 	"include/asset.h"
 	"source/asset.cpp"
-	"include/swapchaincontext.h"
-	"source/swapchaincontext.cpp"
+	"include/swapchain.h"
+	"source/swapchain.cpp"
  "include/renderer.h" "source/renderer.cpp" "include/window.h" "source/window.cpp")
 
 file(GLOB

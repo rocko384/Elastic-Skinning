@@ -3,7 +3,6 @@
 #include "util.h"
 #include "asset.h"
 #include "window.h"
-#include "swapchaincontext.h"
 
 #include <vulkan/vulkan.hpp>
 #include <SDL.h>
@@ -37,8 +36,6 @@ public:
 	void deinit();
 
 	bool is_initialized() { return is_init; }
-
-	SwapchainContext render_swapchain_context;
 
 private:
 
