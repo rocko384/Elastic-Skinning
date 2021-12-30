@@ -77,29 +77,19 @@ GfxContext::~GfxContext() {
 	deinit();
 }
 
-void GfxContext::init(const std::string& AppName) {
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
-		LOG_ERROR("SDL failed to init");
+void GfxContext::init(Window* Window, const std::string& AppName, const std::string& EngineName) {
+	
+	if (Window == nullptr) {
+		LOG_ERROR("Window does not exist");
 		return;
 	}
 
-	/*
-	* Window Creation
-	*/
-
-	window = SDL_CreateWindow(
-		AppName.c_str(),
-		SDL_WINDOWPOS_UNDEFINED,
-		SDL_WINDOWPOS_UNDEFINED,
-		1280,
-		720,
-		SDL_WINDOW_VULKAN
-	);
-
-	if (window == nullptr) {
-		LOG_ERROR("Failed to create window");
+	if (!Window->is_initialized()) {
+		LOG_ERROR("Window is not initialized");
 		return;
 	}
+
+	window = Window;
 
 	/*
 	* Vulkan Extension Establishment
@@ -118,14 +108,14 @@ void GfxContext::init(const std::string& AppName) {
 
 	uint32_t nonSDLRequiredExtensionCount = vkRequiredExtensions.size();
 
-	if (!SDL_Vulkan_GetInstanceExtensions(window, &vkRequiredExtensionCount, nullptr)) {
+	if (!SDL_Vulkan_GetInstanceExtensions(window->window, &vkRequiredExtensionCount, nullptr)) {
 		LOG_ERROR("Failed to get required Vulkan extensions for SDL");
 		return;
 	}
 
 	vkRequiredExtensions.resize(vkRequiredExtensionCount + vkRequiredExtensions.size());
 
-	if (!SDL_Vulkan_GetInstanceExtensions(window, &vkRequiredExtensionCount, vkRequiredExtensions.data() + nonSDLRequiredExtensionCount)) {
+	if (!SDL_Vulkan_GetInstanceExtensions(window->window, &vkRequiredExtensionCount, vkRequiredExtensions.data() + nonSDLRequiredExtensionCount)) {
 		LOG_ERROR("Failed to get required Vulkan extensions for SDL");
 		return;
 	}
@@ -207,7 +197,7 @@ void GfxContext::init(const std::string& AppName) {
 	vk::ApplicationInfo appInfo;
 	appInfo.pApplicationName = AppName.c_str();
 	appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-	appInfo.pEngineName = "No Engine";
+	appInfo.pEngineName = EngineName.c_str();
 	appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
 	appInfo.apiVersion = VK_API_VERSION_1_2;
 
@@ -265,7 +255,7 @@ void GfxContext::init(const std::string& AppName) {
 
 	VkSurfaceKHR surface;
 
-	if (!SDL_Vulkan_CreateSurface(window, vulkan_instance, &surface)) {
+	if (!SDL_Vulkan_CreateSurface(window->window, vulkan_instance, &surface)) {
 		LOG_ERROR("Failed to create window surface");
 		return;
 	}
@@ -371,7 +361,9 @@ void GfxContext::init(const std::string& AppName) {
 	primary_logical_device = logicalDevice;
 
 	primary_queue = logicalDevice.getQueue(primaryQueueFamilyIndex.value(), 0);
+	primary_queue_family_index = primaryQueueFamilyIndex.value();
 	present_queue = logicalDevice.getQueue(presentQueueFamilyIndex.value(), 0);
+	present_queue_family_index = presentQueueFamilyIndex.value();
 
 	/*
 	* Create the swapchain
@@ -381,19 +373,27 @@ void GfxContext::init(const std::string& AppName) {
 
 	uint32_t queueFamilyIndices[] = { primaryQueueFamilyIndex.value(), presentQueueFamilyIndex.value() };
 
-	auto swapchainError = render_swapchain_context.init(window, render_surface, primary_physical_device, primary_logical_device, std::span{queueFamilyIndices});
+	auto swapchainError = render_swapchain_context.init(window->window, render_surface, primary_physical_device, primary_logical_device, std::span{queueFamilyIndices});
 	
-	switch (swapchainError) {
-	case SwapchainContext::SwapchainError::FAIL_CREATE_SWAPCHAIN: 
-		LOG_ERROR("Failed to create swapchain");
-		return;
-		break;
-	case SwapchainContext::SwapchainError::FAIL_CREATE_IMAGE_VIEW:
-		LOG_ERROR("Failed to create swapchain image view");
-		return;
-		break;
-	default:
-		break;
+	if (swapchainError != SwapchainContext::SwapchainError::OK) {
+		LOG_ERROR("Swapchain initialization error");
+
+		switch (swapchainError) {
+		case SwapchainContext::SwapchainError::FAIL_CREATE_SWAPCHAIN:
+			LOG_ERROR("Failed to create swapchain");
+			return;
+			break;
+		case SwapchainContext::SwapchainError::FAIL_CREATE_IMAGE_VIEW:
+			LOG_ERROR("Failed to create swapchain image view");
+			return;
+			break;
+		case SwapchainContext::SwapchainError::FAIL_CREATE_RENDER_PASS:
+			LOG_ERROR("Failed to create swapchain render pass");
+			return;
+			break;
+		default:
+			break;
+		}
 	}
 
 	/*
@@ -420,9 +420,6 @@ void GfxContext::deinit() {
 		}
 
 		vulkan_instance.destroy();
-
-		SDL_DestroyWindow(window);
-		SDL_Quit();
 	}
 
 	is_init = false;

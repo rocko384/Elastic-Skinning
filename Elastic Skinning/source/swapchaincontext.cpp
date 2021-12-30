@@ -137,9 +137,98 @@ SwapchainContext::SwapchainError SwapchainContext::init(SDL_Window* Window, vk::
 
 		image_views[i] = imageView;
 	}
+
+	/*
+	* Create render pass
+	*/
+
+	vk::AttachmentDescription colorAttachment;
+	colorAttachment.format = format;
+	colorAttachment.samples = vk::SampleCountFlagBits::e1;
+	colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	colorAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+	colorAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+	colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
+	colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+
+	vk::AttachmentReference colorAttachmentRef;
+	colorAttachmentRef.attachment = 0;
+	colorAttachmentRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
+
+	vk::SubpassDescription subpass;
+	subpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorAttachmentRef;
+
+	vk::SubpassDependency subpassDependency;
+	subpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	subpassDependency.dstSubpass = 0;
+	subpassDependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+	subpassDependency.srcAccessMask = (vk::AccessFlagBits)(0);
+	subpassDependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+	subpassDependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+
+	vk::RenderPassCreateInfo renderPassInfo;
+	renderPassInfo.attachmentCount = 1;
+	renderPassInfo.pAttachments = &colorAttachment;
+	renderPassInfo.subpassCount = 1;
+	renderPassInfo.pSubpasses = &subpass;
+	renderPassInfo.dependencyCount = 1;
+	renderPassInfo.pDependencies = &subpassDependency;
+
+	vk::RenderPass renderPass = LogicalDevice.createRenderPass(renderPassInfo);
+
+	if (!renderPass) {
+		return SwapchainError::FAIL_CREATE_RENDER_PASS;
+	}
+
+	render_pass = renderPass;
+
+	/*
+	* Create framebuffers
+	*/
+
+	framebuffers.resize(image_views.size());
+
+	for (size_t i = 0; i < image_views.size(); i++) {
+		vk::ImageView attachments[] = { image_views[i] };
+
+		vk::FramebufferCreateInfo framebufferInfo;
+		framebufferInfo.renderPass = render_pass;
+		framebufferInfo.attachmentCount = 1;
+		framebufferInfo.pAttachments = attachments;
+		framebufferInfo.width = extent.width;
+		framebufferInfo.height = extent.height;
+		framebufferInfo.layers = 1;
+
+		vk::Framebuffer framebuffer = LogicalDevice.createFramebuffer(framebufferInfo);
+
+		if (!framebuffer) {
+			return SwapchainError::FAIL_CREATE_FRAMEBUFFER;
+		}
+
+		framebuffers[i] = framebuffer;
+	}
+
+	/*
+	* Finish initialization
+	*/
+
+	return SwapchainError::OK;
 }
 
 void SwapchainContext::deinit() {
+	if (!framebuffers.empty()) {
+		for (auto framebuffer : framebuffers) {
+			creator.destroy(framebuffer);
+		}
+	}
+
+	if (render_pass) {
+		creator.destroy(render_pass);
+	}
+
 	if (!image_views.empty()) {
 		for (auto imageView : image_views) {
 			creator.destroy(imageView);

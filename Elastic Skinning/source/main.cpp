@@ -3,16 +3,29 @@
 
 #include "util.h"
 #include "asset.h"
+#include "window.h"
 #include "gfxcontext.h"
 #include "renderer.h"
 
+const std::string APP_NAME{ "Elastic Skinning" };
+
 int main(int argc, char** argv) {
+	Window window;
+	window.init(APP_NAME);
+
 	GfxContext context;
-	context.init("Elastic Skinning");
+	context.init(&window, APP_NAME);
+
 	Renderer renderer;
 	renderer.init(&context);
 
-	SDL_Delay(1000);
+
+	while (!window.should_close()) {
+		window.poll_events();
+
+		renderer.draw_frame();
+	}
+
 
 	renderer.deinit();
 	context.deinit();

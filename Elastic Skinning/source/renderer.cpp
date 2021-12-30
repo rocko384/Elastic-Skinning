@@ -1,5 +1,7 @@
 #include "renderer.h"
 
+#include <array>
+
 Renderer::~Renderer() {
 
 }
@@ -10,45 +12,13 @@ void Renderer::init(GfxContext* Context) {
 		return;
 	}
 
-	context = Context;
-
-	/*
-	* Create render pass
-	*/
-
-	vk::AttachmentDescription colorAttachment;
-	colorAttachment.format = context->render_swapchain_context.format;
-	colorAttachment.samples = vk::SampleCountFlagBits::e1;
-	colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
-	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-	colorAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-	colorAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-	colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
-	colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
-
-	vk::AttachmentReference colorAttachmentRef;
-	colorAttachmentRef.attachment = 0;
-	colorAttachmentRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
-
-	vk::SubpassDescription subpass;
-	subpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorAttachmentRef;
-
-	vk::RenderPassCreateInfo renderPassInfo;
-	renderPassInfo.attachmentCount = 1;
-	renderPassInfo.pAttachments = &colorAttachment;
-	renderPassInfo.subpassCount = 1;
-	renderPassInfo.pSubpasses = &subpass;
-
-	vk::RenderPass renderPass = context->primary_logical_device.createRenderPass(renderPassInfo);
-
-	if (!renderPass) {
-		LOG_ERROR("Failed to create render pass");
+	if (!Context->is_initialized()) {
+		LOG_ERROR("Graphics context is uninitialized");
 		return;
 	}
 
-	render_pass = renderPass;
+	context = Context;
+	max_frames_in_flight = context->render_swapchain_context.framebuffers.size();
 
 	/*
 	* Create graphics pipeline
@@ -188,7 +158,7 @@ void Renderer::init(GfxContext* Context) {
 	pipelineInfo.pColorBlendState = &colorBlendInfo;
 	pipelineInfo.pDynamicState = nullptr; // &dynamicStateInfo;
 	pipelineInfo.layout = pipeline_layout;
-	pipelineInfo.renderPass = render_pass;
+	pipelineInfo.renderPass = context->render_swapchain_context.render_pass;
 	pipelineInfo.subpass = 0;
 	pipelineInfo.basePipelineHandle = nullptr;
 	pipelineInfo.basePipelineIndex = -1;
@@ -206,6 +176,97 @@ void Renderer::init(GfxContext* Context) {
 	context->primary_logical_device.destroy(fragShaderModule);
 
 	/*
+	* Create command pool
+	*/
+
+	vk::CommandPoolCreateInfo poolInfo;
+	poolInfo.queueFamilyIndex = context->primary_queue_family_index;
+	poolInfo.flags = (vk::CommandPoolCreateFlagBits)(0);
+
+	command_pool = context->primary_logical_device.createCommandPool(poolInfo);
+
+	if (!command_pool) {
+		LOG_ERROR("Failed to create command pool");
+		return;
+	}
+
+	/*
+	* Allocate command buffers
+	*/
+
+	vk::CommandBufferAllocateInfo commandBufferInfo;
+	commandBufferInfo.commandPool = command_pool;
+	commandBufferInfo.level = vk::CommandBufferLevel::ePrimary;
+	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(context->render_swapchain_context.framebuffers.size());
+
+	render_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
+
+	if (render_command_buffers.empty()) {
+		LOG_ERROR("Failed to allocate command buffers");
+		return;
+	}
+
+	/*
+	* Record command buffers
+	*/
+
+	for (size_t i = 0; i < render_command_buffers.size(); i++) {
+		vk::CommandBufferBeginInfo beginInfo;
+		beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
+		beginInfo.pInheritanceInfo = nullptr;
+
+		render_command_buffers[i].begin(beginInfo);
+
+		vk::RenderPassBeginInfo renderPassInfo;
+		renderPassInfo.renderPass = context->render_swapchain_context.render_pass;
+		renderPassInfo.framebuffer = context->render_swapchain_context.framebuffers[i];
+		renderPassInfo.renderArea.offset = vk::Offset2D{ 0,0 };
+		renderPassInfo.renderArea.extent = context->render_swapchain_context.extent;
+		
+		vk::ClearValue clearColor;
+		clearColor.color.float32 = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+
+		renderPassInfo.clearValueCount = 1;
+		renderPassInfo.pClearValues = &clearColor;
+
+		render_command_buffers[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+
+		render_command_buffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+		
+		render_command_buffers[i].draw(3, 1, 0, 0);
+
+		render_command_buffers[i].endRenderPass();
+
+		render_command_buffers[i].end();
+	}
+
+	/*
+	* Create synchronization primitives
+	*/
+
+	image_available_semaphores.resize(max_frames_in_flight);
+	render_finished_semaphores.resize(max_frames_in_flight);
+	in_flight_fences.resize(max_frames_in_flight);
+	images_in_flight.resize(context->render_swapchain_context.images.size(), {});
+
+	vk::SemaphoreCreateInfo semaphoreInfo;
+	vk::FenceCreateInfo fenceInfo;
+	fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
+	
+	for (size_t i = 0; i < max_frames_in_flight; i++) {
+		image_available_semaphores[i] = context->primary_logical_device.createSemaphore(semaphoreInfo);
+		render_finished_semaphores[i] = context->primary_logical_device.createSemaphore(semaphoreInfo);
+		in_flight_fences[i] = context->primary_logical_device.createFence(fenceInfo);
+
+		if (!image_available_semaphores[i] 
+			|| !render_finished_semaphores[i]
+			|| !in_flight_fences[i]) {
+			LOG_ERROR("Failed to create render synch primitives");
+			return;
+		}
+	}
+
+	/*
 	* Finish initialization
 	*/
 
@@ -214,10 +275,73 @@ void Renderer::init(GfxContext* Context) {
 
 void Renderer::deinit() {
 	if (is_initialized()) {
+		context->primary_logical_device.waitIdle();
+
+		for (auto semaphore : image_available_semaphores) {
+			context->primary_logical_device.destroy(semaphore);
+		}
+
+		for (auto semaphore : render_finished_semaphores) {
+			context->primary_logical_device.destroy(semaphore);
+		}
+
+		for (auto fence : in_flight_fences) {
+			context->primary_logical_device.destroy(fence);
+		}
+
+		context->primary_logical_device.destroy(command_pool);
 		context->primary_logical_device.destroy(pipeline);
-		context->primary_logical_device.destroy(render_pass);
 		context->primary_logical_device.destroy(pipeline_layout);
 	}
 
 	is_init = false;
+}
+
+void Renderer::draw_frame() {
+	/// TODO: Consider moving frame sync and organization logic to SwapchainContext 
+
+	std::array<vk::Fence, 1> currentFences = { in_flight_fences[current_frame] };
+	context->primary_logical_device.waitForFences(currentFences, VK_TRUE, UINT64_MAX);
+
+	uint32_t imageIndex = context->primary_logical_device.acquireNextImageKHR(context->render_swapchain_context.swapchain, UINT64_MAX, image_available_semaphores[current_frame], nullptr);
+
+	if (images_in_flight[imageIndex]) {
+		std::array<vk::Fence, 1> ImageInFlightFences = { images_in_flight[imageIndex] };
+		context->primary_logical_device.waitForFences(ImageInFlightFences, VK_TRUE, UINT64_MAX);
+	}
+
+	vk::Semaphore waitSemaphores[] = { image_available_semaphores[current_frame]};
+	vk::Semaphore signalSemaphores[] = { render_finished_semaphores[current_frame] };
+	vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+
+	vk::SubmitInfo submitInfo;
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = waitSemaphores;
+	submitInfo.pWaitDstStageMask = waitStages;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &render_command_buffers[imageIndex];
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = signalSemaphores;
+
+	context->primary_logical_device.resetFences(currentFences);
+
+	context->primary_queue.submit({ submitInfo }, in_flight_fences[current_frame]);
+
+	vk::SwapchainKHR swapChains[] = { context->render_swapchain_context.swapchain };
+
+	vk::PresentInfoKHR presentInfo;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = signalSemaphores;
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = swapChains;
+	presentInfo.pImageIndices = &imageIndex;
+	presentInfo.pResults = nullptr;
+
+	vk::Result presentStatus = context->present_queue.presentKHR(presentInfo);
+	
+	if (presentStatus != vk::Result::eSuccess) {
+		LOG_ERROR("Swapchain presentation failure");
+	}
+
+	current_frame = (current_frame + 1) % max_frames_in_flight;
 }

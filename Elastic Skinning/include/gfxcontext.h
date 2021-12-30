@@ -2,6 +2,7 @@
 
 #include "util.h"
 #include "asset.h"
+#include "window.h"
 #include "swapchaincontext.h"
 
 #include <vulkan/vulkan.hpp>
@@ -32,7 +33,7 @@ public:
 
 	~GfxContext();
 
-	void init(const std::string& AppName = "");
+	void init(Window* Window, const std::string& AppName = "", const std::string& EngineName = "No Engine");
 	void deinit();
 
 	bool is_initialized() { return is_init; }
@@ -46,13 +47,17 @@ private:
 
 	bool is_init{ false };
 
-	SDL_Window* window;
+	Window* window;
+
 	vk::Instance vulkan_instance;
 	vk::DispatchLoaderDynamic instance_extension_loader;
 	vk::DebugUtilsMessengerEXT debug_messenger;
 	vk::SurfaceKHR render_surface;
 	vk::PhysicalDevice primary_physical_device;
 	vk::Device primary_logical_device;
+
 	vk::Queue primary_queue;
+	uint32_t primary_queue_family_index;
 	vk::Queue present_queue;
+	uint32_t present_queue_family_index;
 };
