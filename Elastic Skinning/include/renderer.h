@@ -3,10 +3,12 @@
 #include "util.h"
 #include "gfxcontext.h"
 #include "swapchain.h"
+#include "gfxpipeline.h"
 
 #include <vulkan/vulkan.hpp>
 
 #include <vector>
+#include <cstdint>
 
 class Renderer {
 
@@ -23,13 +25,18 @@ public:
 
 private:
 
+	bool should_render();
+
+	void window_resized_callback(size_t w, size_t h);
+	void window_minimized_callback();
+	void window_restored_callback();
+
 	bool is_init{ false };
 
 	GfxContext* context{ nullptr };
 	Swapchain render_swapchain;
 
-	vk::PipelineLayout pipeline_layout;
-	vk::Pipeline pipeline;
+	GfxPipeline pipeline;
 
 	vk::CommandPool command_pool;
 	std::vector<vk::CommandBuffer> render_command_buffers;

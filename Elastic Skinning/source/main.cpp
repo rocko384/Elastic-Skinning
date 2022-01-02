@@ -11,7 +11,7 @@ const std::string APP_NAME{ "Elastic Skinning" };
 
 int main(int argc, char** argv) {
 	Window window;
-	window.init(APP_NAME);
+	window.init(APP_NAME, true);
 
 	GfxContext context;
 	context.init(&window, APP_NAME);
@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
 
 	renderer.deinit();
 	context.deinit();
+	window.deinit();
 
 	return 0;
 }

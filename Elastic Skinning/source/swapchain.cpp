@@ -1,17 +1,18 @@
 #include "swapchain.h"
 
 #include <algorithm>
+#include <array>
 
 Swapchain::~Swapchain() {
 	deinit();
 }
 
-Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR RenderSurface, vk::PhysicalDevice PhysicalDevice, vk::Device LogicalDevice, std::span<uint32_t> QueueFamilyIndices) {
-	creator = LogicalDevice;
+Swapchain::Error Swapchain::init(GfxContext* context) {
+	creator = context->primary_logical_device;
 	
-	auto surfaceCapabilities = PhysicalDevice.getSurfaceCapabilitiesKHR(RenderSurface);
-	auto surfaceFormats = PhysicalDevice.getSurfaceFormatsKHR(RenderSurface);
-	auto surfacePresentModes = PhysicalDevice.getSurfacePresentModesKHR(RenderSurface);
+	auto surfaceCapabilities = context->primary_physical_device.getSurfaceCapabilitiesKHR(context->render_surface);
+	auto surfaceFormats = context->primary_physical_device.getSurfaceFormatsKHR(context->render_surface);
+	auto surfacePresentModes = context->primary_physical_device.getSurfacePresentModesKHR(context->render_surface);
 
 	vk::SurfaceFormatKHR bestFormat = surfaceFormats[0].format;
 
@@ -39,7 +40,7 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 	}
 	else {
 		int width, height;
-		SDL_Vulkan_GetDrawableSize(Window, &width, &height);
+		SDL_Vulkan_GetDrawableSize(context->window->window, &width, &height);
 
 		vk::Extent2D actualExtent{
 			static_cast<uint32_t>(width),
@@ -66,7 +67,7 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 	imageCount = std::clamp(imageCount, imageCount, surfaceCapabilities.maxImageCount);
 
 	vk::SwapchainCreateInfoKHR swapchainCreateInfo;
-	swapchainCreateInfo.surface = RenderSurface;
+	swapchainCreateInfo.surface = context->render_surface;
 	swapchainCreateInfo.minImageCount = imageCount;
 	swapchainCreateInfo.imageFormat = bestFormat.format;
 	swapchainCreateInfo.imageColorSpace = bestFormat.colorSpace;
@@ -74,11 +75,12 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 	swapchainCreateInfo.imageArrayLayers = 1;
 	swapchainCreateInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
 
+	std::array<uint32_t, 2> queueFamilyIndices{ context->primary_queue_family_index, context->present_queue_family_index };
 
 	bool areQueuesUnique = true;
-	if (QueueFamilyIndices.size() > 1) {
-		for (size_t i = 1; i < QueueFamilyIndices.size(); i++) {
-			if (QueueFamilyIndices[i] == QueueFamilyIndices[i - 1]) {
+	if (queueFamilyIndices.size() > 1) {
+		for (size_t i = 1; i < queueFamilyIndices.size(); i++) {
+			if (queueFamilyIndices[i] == queueFamilyIndices[i - 1]) {
 				areQueuesUnique = false;
 				break;
 			}
@@ -87,8 +89,8 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 
 	if (areQueuesUnique) {
 		swapchainCreateInfo.imageSharingMode = vk::SharingMode::eConcurrent;
-		swapchainCreateInfo.queueFamilyIndexCount = QueueFamilyIndices.size();
-		swapchainCreateInfo.pQueueFamilyIndices = QueueFamilyIndices.data();
+		swapchainCreateInfo.queueFamilyIndexCount = queueFamilyIndices.size();
+		swapchainCreateInfo.pQueueFamilyIndices = queueFamilyIndices.data();
 	}
 	else {
 		swapchainCreateInfo.imageSharingMode = vk::SharingMode::eExclusive;
@@ -102,10 +104,10 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 	swapchainCreateInfo.clipped = VK_TRUE;
 	swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-	vk::SwapchainKHR tswapchain = LogicalDevice.createSwapchainKHR(swapchainCreateInfo);
+	vk::SwapchainKHR tswapchain = creator.createSwapchainKHR(swapchainCreateInfo);
 
 	if (!tswapchain) {
-		return SwapchainError::FAIL_CREATE_SWAPCHAIN;
+		return Error::FAIL_CREATE_SWAPCHAIN;
 	}
 
 	swapchain = tswapchain;
@@ -113,7 +115,7 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 	format = bestFormat.format;
 	extent = bestExtent;
 
-	images = LogicalDevice.getSwapchainImagesKHR(swapchain);
+	images = creator.getSwapchainImagesKHR(swapchain);
 
 	image_views.resize(images.size());
 
@@ -132,11 +134,11 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 		imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
 		imageViewCreateInfo.subresourceRange.layerCount = 1;
 
-		vk::ImageView imageView = LogicalDevice.createImageView(imageViewCreateInfo);
+		vk::ImageView imageView = creator.createImageView(imageViewCreateInfo);
 
 		if (!imageView) {
 			image_views.clear();
-			return SwapchainError::FAIL_CREATE_IMAGE_VIEW;
+			return Error::FAIL_CREATE_IMAGE_VIEW;
 		}
 
 		image_views[i] = imageView;
@@ -181,10 +183,10 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 	renderPassInfo.dependencyCount = 1;
 	renderPassInfo.pDependencies = &subpassDependency;
 
-	vk::RenderPass renderPass = LogicalDevice.createRenderPass(renderPassInfo);
+	vk::RenderPass renderPass = creator.createRenderPass(renderPassInfo);
 
 	if (!renderPass) {
-		return SwapchainError::FAIL_CREATE_RENDER_PASS;
+		return Error::FAIL_CREATE_RENDER_PASS;
 	}
 
 	render_pass = renderPass;
@@ -206,10 +208,10 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 		framebufferInfo.height = extent.height;
 		framebufferInfo.layers = 1;
 
-		vk::Framebuffer framebuffer = LogicalDevice.createFramebuffer(framebufferInfo);
+		vk::Framebuffer framebuffer = creator.createFramebuffer(framebufferInfo);
 
 		if (!framebuffer) {
-			return SwapchainError::FAIL_CREATE_FRAMEBUFFER;
+			return Error::FAIL_CREATE_FRAMEBUFFER;
 		}
 
 		framebuffers[i] = framebuffer;
@@ -221,7 +223,7 @@ Swapchain::SwapchainError Swapchain::init(SDL_Window* Window, vk::SurfaceKHR Ren
 	
 	is_init = true;
 
-	return SwapchainError::OK;
+	return Error::OK;
 }
 
 void Swapchain::deinit() {

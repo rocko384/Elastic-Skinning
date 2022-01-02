@@ -1,15 +1,16 @@
 #pragma once
 
+#include "gfxcontext.h"
+
 #include <vulkan/vulkan.hpp>
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
 #include <vector>
-#include <span>
 #include <cstdint>
 
 struct Swapchain {
-	enum class SwapchainError {
+	enum class Error {
 		OK,
 		FAIL_CREATE_SWAPCHAIN,
 		FAIL_CREATE_IMAGE_VIEW,
@@ -19,7 +20,7 @@ struct Swapchain {
 
 	~Swapchain();
 
-	SwapchainError init(SDL_Window* Window, vk::SurfaceKHR RenderSurface, vk::PhysicalDevice PhysicalDevice, vk::Device LogicalDevice, std::span<uint32_t> QueueFamilyIndices);
+	Error init(GfxContext* context);
 	void deinit();
 
 	bool is_initialized() { return is_init; }

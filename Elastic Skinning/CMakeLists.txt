@@ -14,7 +14,7 @@ set(SOURCE
 	"source/asset.cpp"
 	"include/swapchain.h"
 	"source/swapchain.cpp"
- "include/renderer.h" "source/renderer.cpp" "include/window.h" "source/window.cpp")
+ "include/renderer.h" "source/renderer.cpp" "include/window.h" "source/window.cpp" "include/gfxpipeline.h" "source/gfxpipeline.cpp")
 
 file(GLOB
 	SHADERS

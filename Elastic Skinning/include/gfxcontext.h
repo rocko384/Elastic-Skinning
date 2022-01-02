@@ -10,6 +10,7 @@
 
 #include <string>
 #include <vector>
+#include <filesystem>
 
 #define REQUIRED_VULKAN_EXTENSIONS 
 
@@ -22,11 +23,11 @@
 #define VULKAN_VALIDATION_LAYERS \
 	"VK_LAYER_KHRONOS_validation"
 
-class Renderer;
-
 class GfxContext {
 
 	friend class Renderer;
+	friend class Swapchain;
+	friend class GfxPipeline;
 
 public:
 
