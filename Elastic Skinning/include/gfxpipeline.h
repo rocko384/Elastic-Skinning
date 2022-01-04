@@ -20,26 +20,36 @@ struct GfxPipeline {
 		FAIL_CREATE_PIPELINE
 	};
 
+	GfxPipeline() = default;
+	GfxPipeline(GfxPipeline&& rhs) noexcept;
 	~GfxPipeline();
 
-	void set_vertex_shader(std::filesystem::path path);
-	void set_tessellation_control_shader(std::filesystem::path path);
-	void set_tessellation_eval_shader(std::filesystem::path path);
-	void set_geometry_shader(std::filesystem::path path);
-	void set_fragment_shader(std::filesystem::path path);
+	GfxPipeline& operator=(GfxPipeline&& rhs) noexcept;
+
+	GfxPipeline& set_vertex_shader(std::filesystem::path path);
+	GfxPipeline& set_tessellation_control_shader(std::filesystem::path path);
+	GfxPipeline& set_tessellation_eval_shader(std::filesystem::path path);
+	GfxPipeline& set_geometry_shader(std::filesystem::path path);
+	GfxPipeline& set_fragment_shader(std::filesystem::path path);
+	GfxPipeline& set_target(/* RenderTarget Target */); // TODO: Implement other possible render targets
 
 	Error init(GfxContext* Context, Swapchain* Swapchain);
+	Error reinit();
 	void deinit();
 
 	bool is_initialized() { return is_init; }
+	bool is_swapchain_dependent() { return should_init_with_swapchain; };
 
 	vk::PipelineLayout pipeline_layout;
 	vk::Pipeline pipeline;
+
 private:
 
 	bool is_init{ false };
+	bool should_init_with_swapchain{ true };
 
 	GfxContext* context{ nullptr };
+	Swapchain* swapchain{ nullptr };
 
 	std::filesystem::path vertex_shader_path;
 	std::filesystem::path tessellation_control_shader_path;

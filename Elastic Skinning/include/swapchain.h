@@ -12,6 +12,8 @@
 struct Swapchain {
 	enum class Error {
 		OK,
+		INVALID_CONTEXT,
+		UNINITIALIZED_CONTEXT,
 		FAIL_CREATE_SWAPCHAIN,
 		FAIL_CREATE_IMAGE_VIEW,
 		FAIL_CREATE_RENDER_PASS,
@@ -20,7 +22,8 @@ struct Swapchain {
 
 	~Swapchain();
 
-	Error init(GfxContext* context);
+	Error init(GfxContext* Context);
+	Error reinit();
 	void deinit();
 
 	bool is_initialized() { return is_init; }
@@ -37,5 +40,5 @@ private:
 
 	bool is_init{ false };
 
-	vk::Device creator;
+	GfxContext* context{ nullptr };
 };

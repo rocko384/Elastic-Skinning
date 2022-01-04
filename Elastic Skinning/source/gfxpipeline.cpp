@@ -2,29 +2,78 @@
 
 #include <vector>
 
+GfxPipeline::GfxPipeline(GfxPipeline&& rhs) noexcept {
+	this->operator=(std::move(rhs));
+}
+
 GfxPipeline::~GfxPipeline() {
 	deinit();
 }
 
-void GfxPipeline::set_vertex_shader(std::filesystem::path path) {
+GfxPipeline& GfxPipeline::operator=(GfxPipeline&& rhs) noexcept {
+	this->pipeline_layout = rhs.pipeline_layout;
+	this->pipeline = rhs.pipeline;
+	this->is_init = rhs.is_init;
+	this->should_init_with_swapchain = rhs.should_init_with_swapchain;
+	this->context = rhs.context;
+	this->swapchain = rhs.swapchain;
+	this->vertex_shader_path = rhs.vertex_shader_path;
+	this->tessellation_control_shader_path = rhs.tessellation_control_shader_path;
+	this->tessellation_eval_shader_path = rhs.tessellation_eval_shader_path;
+	this->geometry_shader_path = rhs.geometry_shader_path;
+	this->fragment_shader_path = rhs.fragment_shader_path;
+
+	rhs.pipeline_layout = nullptr;
+	rhs.pipeline = nullptr;
+	rhs.is_init = false;
+	rhs.should_init_with_swapchain = true;
+	rhs.context = nullptr;
+	rhs.swapchain = nullptr;
+	rhs.vertex_shader_path.clear();
+	rhs.tessellation_control_shader_path.clear();
+	rhs.tessellation_eval_shader_path.clear();
+	rhs.geometry_shader_path.clear();
+	rhs.fragment_shader_path.clear();
+
+	return *this;
+}
+
+GfxPipeline& GfxPipeline::set_vertex_shader(std::filesystem::path path) {
 	vertex_shader_path = path;
+
+	return *this;
 }
 
-void GfxPipeline::set_tessellation_control_shader(std::filesystem::path path) {
+GfxPipeline& GfxPipeline::set_tessellation_control_shader(std::filesystem::path path) {
 	tessellation_control_shader_path = path;
+
+	return *this;
 }
 
-void GfxPipeline::set_tessellation_eval_shader(std::filesystem::path path) {
+GfxPipeline& GfxPipeline::set_tessellation_eval_shader(std::filesystem::path path) {
 	tessellation_eval_shader_path = path;
+
+	return *this;
 }
 
-void GfxPipeline::set_geometry_shader(std::filesystem::path path) {
+GfxPipeline& GfxPipeline::set_geometry_shader(std::filesystem::path path) {
 	geometry_shader_path = path;
+
+	return *this;
 }
 
-void GfxPipeline::set_fragment_shader(std::filesystem::path path) {
+GfxPipeline& GfxPipeline::set_fragment_shader(std::filesystem::path path) {
 	fragment_shader_path = path;
+
+	return *this;
 }
+
+GfxPipeline& GfxPipeline::set_target(/* RenderTarget Target */) {
+	should_init_with_swapchain = false;
+
+	return *this;
+}
+
 
 GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) {
 	if (!Context) {
@@ -44,6 +93,7 @@ GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) 
 	}
 
 	context = Context;
+	swapchain = Swapchain;
 
 	// Shader stage definition
 	
@@ -135,14 +185,14 @@ GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) 
 	vk::Viewport viewport;
 	viewport.x = 0.0f;
 	viewport.y = 0.0f;
-	viewport.width = Swapchain->extent.width;
-	viewport.height = Swapchain->extent.height;
+	viewport.width = swapchain->extent.width;
+	viewport.height = swapchain->extent.height;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
 
 	vk::Rect2D scissor;
 	scissor.offset = vk::Offset2D{ 0, 0 };
-	scissor.extent = Swapchain->extent;
+	scissor.extent = swapchain->extent;
 
 	vk::PipelineViewportStateCreateInfo viewportStateInfo;
 	viewportStateInfo.viewportCount = 1;
@@ -234,7 +284,7 @@ GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) 
 	pipelineInfo.pColorBlendState = &colorBlendInfo;
 	pipelineInfo.pDynamicState = nullptr; // &dynamicStateInfo;
 	pipelineInfo.layout = pipeline_layout;
-	pipelineInfo.renderPass = Swapchain->render_pass;
+	pipelineInfo.renderPass = swapchain->render_pass;
 	pipelineInfo.subpass = 0;
 	pipelineInfo.basePipelineHandle = nullptr;
 	pipelineInfo.basePipelineIndex = -1;
@@ -251,6 +301,18 @@ GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) 
 		context->primary_logical_device.destroy(shader);
 	}
 
+	is_init = true;
+
+	return Error::OK;
+}
+
+GfxPipeline::Error GfxPipeline::reinit() {
+	deinit();
+
+	if (is_swapchain_dependent()) {
+		return init(context, swapchain);
+	}
+
 	return Error::OK;
 }
 
@@ -259,4 +321,6 @@ void GfxPipeline::deinit() {
 		context->primary_logical_device.destroy(pipeline);
 		context->primary_logical_device.destroy(pipeline_layout);
 	}
+
+	is_init = false;
 }

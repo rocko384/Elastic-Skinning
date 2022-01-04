@@ -19,9 +19,21 @@ void Renderer::init(GfxContext* Context) {
 
 	context = Context;
 
+	context->window->add_resized_callback(
+		[this](size_t w, size_t h) {
+			this->window_resized_callback(w, h);
+		}
+	);
+
 	context->window->add_minimized_callback(
 		[this]() {
 			this->window_minimized_callback();
+		}
+	);
+
+	context->window->add_maximized_callback(
+		[this]() {
+			this->window_maximized_callback();
 		}
 	);
 
@@ -40,9 +52,15 @@ void Renderer::init(GfxContext* Context) {
 	auto swapchainError = render_swapchain.init(context);
 
 	if (swapchainError != Swapchain::Error::OK) {
-		LOG_ERROR("Swapchain initialization error");
-
 		switch (swapchainError) {
+		case Swapchain::Error::INVALID_CONTEXT:
+			LOG_ERROR("Swapchain was given invalid graphics context");
+			return;
+			break;
+		case Swapchain::Error::UNINITIALIZED_CONTEXT:
+			LOG_ERROR("Swapchain was given uninitalized graphics context");
+			return;
+			break;
 		case Swapchain::Error::FAIL_CREATE_SWAPCHAIN:
 			LOG_ERROR("Failed to create swapchain");
 			return;
@@ -63,54 +81,12 @@ void Renderer::init(GfxContext* Context) {
 	max_frames_in_flight = render_swapchain.framebuffers.size();
 
 	/*
-	* Create graphics pipeline
-	*/
-
-	pipeline.set_vertex_shader("shaders/base.vert.bin");
-	pipeline.set_fragment_shader("shaders/base.frag.bin");
-	
-	auto pipelineError = pipeline.init(context, &render_swapchain);
-
-	switch (pipelineError) {
-	case GfxPipeline::Error::INVALID_CONTEXT:
-		LOG_ERROR("Pipeline was given invalid graphics context");
-		return;
-		break;
-	case GfxPipeline::Error::UNINITIALIZED_CONTEXT:
-		LOG_ERROR("Pipeline was given uninitalized graphics context");
-		return;
-		break;
-	case GfxPipeline::Error::INVALID_SWAPCHAIN:
-		LOG_ERROR("Pipeline was given invalid swapchain");
-		return;
-		break;
-	case GfxPipeline::Error::UNINITIALIZED_SWAPCHAIN:
-		LOG_ERROR("Pipeline was given uninitialized swapchain");
-		return;
-		break;
-	case GfxPipeline::Error::NO_SHADERS:
-		LOG_ERROR("Pipeline was given no shaders");
-		return;
-		break;
-	case GfxPipeline::Error::FAIL_CREATE_PIPELINE_LAYOUT:
-		LOG_ERROR("Failed to create pipeline layout");
-		return;
-		break;
-	case GfxPipeline::Error::FAIL_CREATE_PIPELINE:
-		LOG_ERROR("Failed to create graphics pipeline");
-		return;
-		break;
-	default:
-		break;
-	}
-
-	/*
 	* Create command pool
 	*/
 
 	vk::CommandPoolCreateInfo poolInfo;
 	poolInfo.queueFamilyIndex = context->primary_queue_family_index;
-	poolInfo.flags = (vk::CommandPoolCreateFlagBits)(0);
+	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient;
 
 	command_pool = context->primary_logical_device.createCommandPool(poolInfo);
 
@@ -128,45 +104,18 @@ void Renderer::init(GfxContext* Context) {
 	commandBufferInfo.level = vk::CommandBufferLevel::ePrimary;
 	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(render_swapchain.framebuffers.size());
 
-	render_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
+	auto commandBuffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
 
-	if (render_command_buffers.empty()) {
+	if (commandBuffers.empty()) {
 		LOG_ERROR("Failed to allocate command buffers");
 		return;
 	}
 
-	/*
-	* Record command buffers
-	*/
+	std::vector<CommandBufferWithMutex> tempBuffers(commandBuffers.size());
+	render_command_buffers.swap(tempBuffers);
 
-	for (size_t i = 0; i < render_command_buffers.size(); i++) {
-		vk::CommandBufferBeginInfo beginInfo;
-		beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
-		beginInfo.pInheritanceInfo = nullptr;
-
-		render_command_buffers[i].begin(beginInfo);
-
-		vk::RenderPassBeginInfo renderPassInfo;
-		renderPassInfo.renderPass = render_swapchain.render_pass;
-		renderPassInfo.framebuffer = render_swapchain.framebuffers[i];
-		renderPassInfo.renderArea.offset = vk::Offset2D{ 0,0 };
-		renderPassInfo.renderArea.extent = render_swapchain.extent;
-		
-		vk::ClearValue clearColor;
-		clearColor.color.float32 = { { 0.0f, 0.0f, 0.0f, 1.0f } };
-
-		renderPassInfo.clearValueCount = 1;
-		renderPassInfo.pClearValues = &clearColor;
-
-		render_command_buffers[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
-
-		render_command_buffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.pipeline);
-		
-		render_command_buffers[i].draw(3, 1, 0, 0);
-
-		render_command_buffers[i].endRenderPass();
-
-		render_command_buffers[i].end();
+	for (size_t i = 0; i < commandBuffers.size(); i++) {
+		render_command_buffers[i].command_bufer = commandBuffers[i];
 	}
 
 	/*
@@ -220,7 +169,9 @@ void Renderer::deinit() {
 
 		context->primary_logical_device.destroy(command_pool);
 
-		pipeline.deinit();
+		for (auto& pipeline : pipelines) {
+			pipeline.second.deinit();
+		}
 
 		render_swapchain.deinit();
 	}
@@ -228,9 +179,68 @@ void Renderer::deinit() {
 	is_init = false;
 }
 
+Renderer::Error Renderer::register_pipeline(const std::string& Name, GfxPipeline&& Pipeline) {
+	return register_pipeline(std::hash<std::string>()(Name), std::move(Pipeline));
+}
+
+Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipeline&& Pipeline) {
+	if (pipelines.contains(Name)) {
+		return Error::PIPELINE_WITH_NAME_ALREADY_EXISTS;
+	}
+
+	pipelines[Name] = std::move(Pipeline);
+	pipelines[Name].deinit();
+
+	GfxPipeline::Error pipelineError;
+
+	if (pipelines[Name].is_swapchain_dependent()) {
+		pipelineError = pipelines[Name].init(context, &render_swapchain);
+	}
+
+	switch (pipelineError) {
+	case GfxPipeline::Error::INVALID_CONTEXT:
+		LOG_ERROR("Pipeline was given invalid graphics context");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
+	case GfxPipeline::Error::UNINITIALIZED_CONTEXT:
+		LOG_ERROR("Pipeline was given uninitalized graphics context");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
+	case GfxPipeline::Error::INVALID_SWAPCHAIN:
+		LOG_ERROR("Pipeline was given invalid swapchain");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
+	case GfxPipeline::Error::UNINITIALIZED_SWAPCHAIN:
+		LOG_ERROR("Pipeline was given uninitialized swapchain");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
+	case GfxPipeline::Error::NO_SHADERS:
+		LOG_ERROR("Pipeline was given no shaders");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
+	case GfxPipeline::Error::FAIL_CREATE_PIPELINE_LAYOUT:
+		LOG_ERROR("Failed to create pipeline layout");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
+	case GfxPipeline::Error::FAIL_CREATE_PIPELINE:
+		LOG_ERROR("Failed to create graphics pipeline");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
+	default:
+		break;
+	}
+
+	return Error::OK;
+}
+
 void Renderer::draw_frame() {
 	if (!should_render()) {
 		return;
+	}
+
+	if (is_first_render) {
+		record_command_buffers();
+		is_first_render = false;
 	}
 
 	/// TODO: Consider moving frame sync and organization logic to SwapchainContext 
@@ -262,7 +272,7 @@ void Renderer::draw_frame() {
 	submitInfo.pWaitSemaphores = waitSemaphores;
 	submitInfo.pWaitDstStageMask = waitStages;
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &render_command_buffers[imageIndex];
+	submitInfo.pCommandBuffers = &render_command_buffers[imageIndex].command_bufer;
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = signalSemaphores;
 
@@ -290,16 +300,81 @@ void Renderer::draw_frame() {
 }
 
 bool Renderer::should_render() {
-	return !context->window->is_minimized() || !render_swapchain.is_initialized();
+	return !context->window->is_minimized()
+		|| !render_swapchain.is_initialized()
+		|| !are_command_buffers_recorded;
+}
+
+void Renderer::record_command_buffers() {
+	context->primary_logical_device.waitIdle();
+
+	for (size_t i = 0; i < render_command_buffers.size(); i++) {
+		const std::lock_guard<std::mutex> lock(render_command_buffers[i].mutex);
+
+		vk::CommandBufferBeginInfo beginInfo;
+		beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
+		beginInfo.pInheritanceInfo = nullptr;
+
+		render_command_buffers[i].command_bufer.begin(beginInfo);
+
+		vk::RenderPassBeginInfo renderPassInfo;
+		renderPassInfo.renderPass = render_swapchain.render_pass;
+		renderPassInfo.framebuffer = render_swapchain.framebuffers[i];
+		renderPassInfo.renderArea.offset = vk::Offset2D{ 0,0 };
+		renderPassInfo.renderArea.extent = render_swapchain.extent;
+
+		vk::ClearValue clearColor;
+		clearColor.color.float32 = { { 0.1f, 0.1f, 0.1f, 0.0f } };
+
+		renderPassInfo.clearValueCount = 1;
+		renderPassInfo.pClearValues = &clearColor;
+
+		render_command_buffers[i].command_bufer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+
+		render_command_buffers[i].command_bufer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines[std::hash<std::string>()("base")].pipeline);
+
+		render_command_buffers[i].command_bufer.draw(3, 1, 0, 0);
+
+		render_command_buffers[i].command_bufer.endRenderPass();
+
+		render_command_buffers[i].command_bufer.end();
+	}
+
+	are_command_buffers_recorded = true;
+}
+
+void Renderer::reset_command_buffers() {
+	context->primary_logical_device.waitIdle();
+
+	for (auto& commandBuffer : render_command_buffers) {
+		const std::lock_guard<std::mutex> lock(commandBuffer.mutex);
+
+		commandBuffer.command_bufer.reset();
+	}
+
+	are_command_buffers_recorded = false;
 }
 
 void Renderer::window_resized_callback(size_t w, size_t h) {
-	render_swapchain.deinit();
-	render_swapchain.init(context);
+	window_restored_callback();
 }
 
 void Renderer::window_minimized_callback() {
 }
 
+void Renderer::window_maximized_callback() {
+	window_restored_callback();
+}
+
 void Renderer::window_restored_callback() {
+	context->primary_logical_device.waitIdle();
+
+	render_swapchain.reinit();
+
+	for (auto& pipeline : pipelines) {
+		pipeline.second.reinit();
+	}
+
+	reset_command_buffers();
+	record_command_buffers();
 }

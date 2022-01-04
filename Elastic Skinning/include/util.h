@@ -8,6 +8,8 @@ struct Retval {
 	STATUS_TYPE status;
 };
 
+using StringHash = size_t;
+
 #define LOG(format, ...) \
 	fprintf(stdout, "\33[38;5;75m"); \
 	fprintf(stdout, format, __VA_ARGS__); \

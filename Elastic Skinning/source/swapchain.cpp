@@ -7,8 +7,16 @@ Swapchain::~Swapchain() {
 	deinit();
 }
 
-Swapchain::Error Swapchain::init(GfxContext* context) {
-	creator = context->primary_logical_device;
+Swapchain::Error Swapchain::init(GfxContext* Context) {
+	if (!Context) {
+		return Error::INVALID_CONTEXT;
+	}
+
+	if (!Context->is_initialized()) {
+		return Error::UNINITIALIZED_CONTEXT;
+	}
+
+	context = Context;
 	
 	auto surfaceCapabilities = context->primary_physical_device.getSurfaceCapabilitiesKHR(context->render_surface);
 	auto surfaceFormats = context->primary_physical_device.getSurfaceFormatsKHR(context->render_surface);
@@ -104,7 +112,7 @@ Swapchain::Error Swapchain::init(GfxContext* context) {
 	swapchainCreateInfo.clipped = VK_TRUE;
 	swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-	vk::SwapchainKHR tswapchain = creator.createSwapchainKHR(swapchainCreateInfo);
+	vk::SwapchainKHR tswapchain = context->primary_logical_device.createSwapchainKHR(swapchainCreateInfo);
 
 	if (!tswapchain) {
 		return Error::FAIL_CREATE_SWAPCHAIN;
@@ -115,7 +123,7 @@ Swapchain::Error Swapchain::init(GfxContext* context) {
 	format = bestFormat.format;
 	extent = bestExtent;
 
-	images = creator.getSwapchainImagesKHR(swapchain);
+	images = context->primary_logical_device.getSwapchainImagesKHR(swapchain);
 
 	image_views.resize(images.size());
 
@@ -134,7 +142,7 @@ Swapchain::Error Swapchain::init(GfxContext* context) {
 		imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
 		imageViewCreateInfo.subresourceRange.layerCount = 1;
 
-		vk::ImageView imageView = creator.createImageView(imageViewCreateInfo);
+		vk::ImageView imageView = context->primary_logical_device.createImageView(imageViewCreateInfo);
 
 		if (!imageView) {
 			image_views.clear();
@@ -183,7 +191,7 @@ Swapchain::Error Swapchain::init(GfxContext* context) {
 	renderPassInfo.dependencyCount = 1;
 	renderPassInfo.pDependencies = &subpassDependency;
 
-	vk::RenderPass renderPass = creator.createRenderPass(renderPassInfo);
+	vk::RenderPass renderPass = context->primary_logical_device.createRenderPass(renderPassInfo);
 
 	if (!renderPass) {
 		return Error::FAIL_CREATE_RENDER_PASS;
@@ -208,7 +216,7 @@ Swapchain::Error Swapchain::init(GfxContext* context) {
 		framebufferInfo.height = extent.height;
 		framebufferInfo.layers = 1;
 
-		vk::Framebuffer framebuffer = creator.createFramebuffer(framebufferInfo);
+		vk::Framebuffer framebuffer = context->primary_logical_device.createFramebuffer(framebufferInfo);
 
 		if (!framebuffer) {
 			return Error::FAIL_CREATE_FRAMEBUFFER;
@@ -226,28 +234,33 @@ Swapchain::Error Swapchain::init(GfxContext* context) {
 	return Error::OK;
 }
 
+Swapchain::Error Swapchain::reinit() {
+	deinit();
+	return init(context);
+}
+
 void Swapchain::deinit() {
 	if (is_initialized()) {
 		if (!framebuffers.empty()) {
 			for (auto framebuffer : framebuffers) {
-				creator.destroy(framebuffer);
+				context->primary_logical_device.destroy(framebuffer);
 			}
 
 			framebuffers.clear();
 		}
 
 		if (render_pass) {
-			creator.destroy(render_pass);
+			context->primary_logical_device.destroy(render_pass);
 		}
 
 		if (!image_views.empty()) {
 			for (auto imageView : image_views) {
-				creator.destroy(imageView);
+				context->primary_logical_device.destroy(imageView);
 			}
 		}
 
 		if (swapchain) {
-			creator.destroy(swapchain);
+			context->primary_logical_device.destroy(swapchain);
 		}
 	}
 

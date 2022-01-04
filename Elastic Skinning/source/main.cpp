@@ -19,6 +19,12 @@ int main(int argc, char** argv) {
 	Renderer renderer;
 	renderer.init(&context);
 
+	GfxPipeline base_pipeline;
+	base_pipeline
+		.set_vertex_shader("shaders/base.vert.bin")
+		.set_fragment_shader("shaders/base.frag.bin");
+
+	renderer.register_pipeline("base", std::move(base_pipeline));
 
 	while (!window.should_close()) {
 		window.poll_events();

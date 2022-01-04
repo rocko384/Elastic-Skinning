@@ -67,8 +67,16 @@ void Window::poll_events() {
 	}
 }
 
+void Window::add_resized_callback(Window::ResizedCallback callback) {
+	resized_callbacks.push_back(callback);
+}
+
 void Window::add_minimized_callback(Window::MinimizedCallback callback) {
 	minimized_callbacks.push_back(callback);
+}
+
+void Window::add_maximized_callback(Window::MaximizedCallback callback) {
+	maximized_callbacks.push_back(callback);
 }
 
 void Window::add_restored_callback(Window::RestoredCallback callback) {
@@ -92,6 +100,7 @@ void Window::handle_window_event(SDL_WindowEvent e) {
 			[w = e.data1, h = e.data2](ResizedCallback& callback) {
 				callback(static_cast<size_t>(w), static_cast<size_t>(h));
 			});
+		break;
 	case SDL_WINDOWEVENT_MINIMIZED:
 		LOG("Window minimized\n");
 		std::for_each(minimized_callbacks.begin(), minimized_callbacks.end(),
@@ -102,6 +111,10 @@ void Window::handle_window_event(SDL_WindowEvent e) {
 		break;
 	case SDL_WINDOWEVENT_MAXIMIZED:
 		LOG("Window maximized\n");
+		std::for_each(maximized_callbacks.begin(), maximized_callbacks.end(),
+			[](MaximizedCallback& callback) {
+				callback();
+			});
 		break;
 	case SDL_WINDOWEVENT_RESTORED:
 		LOG("Window restored\n");

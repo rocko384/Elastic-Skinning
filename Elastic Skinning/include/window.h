@@ -15,6 +15,7 @@ public:
 
 	using ResizedCallback = std::function<void(size_t w, size_t h)>;
 	using MinimizedCallback = std::function<void()>;
+	using MaximizedCallback = std::function<void()>;
 	using RestoredCallback = std::function<void()>;
 
 public:
@@ -31,6 +32,7 @@ public:
 
 	void add_resized_callback(ResizedCallback callback);
 	void add_minimized_callback(MinimizedCallback callback);
+	void add_maximized_callback(MaximizedCallback callback);
 	void add_restored_callback(RestoredCallback callback);
 
 	SDL_Window* window;
@@ -45,5 +47,6 @@ private:
 
 	std::vector<ResizedCallback> resized_callbacks;
 	std::vector<MinimizedCallback> minimized_callbacks;
+	std::vector<MaximizedCallback> maximized_callbacks;
 	std::vector<RestoredCallback> restored_callbacks;
 };
