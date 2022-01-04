@@ -11,7 +11,6 @@
 #include <string>
 #include <unordered_map>
 #include <functional>
-#include <mutex>
 #include <cstdint>
 
 class Renderer {
@@ -56,13 +55,8 @@ private:
 
 	std::unordered_map<StringHash, GfxPipeline> pipelines;
 
-	struct CommandBufferWithMutex {
-		vk::CommandBuffer command_bufer;
-		std::mutex mutex;
-	};
-
 	vk::CommandPool command_pool;
-	std::vector<CommandBufferWithMutex> render_command_buffers;
+	std::vector<vk::CommandBuffer> render_command_buffers;
 	bool are_command_buffers_recorded{ false };
 
 	size_t max_frames_in_flight{ 0 };

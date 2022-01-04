@@ -104,18 +104,11 @@ void Renderer::init(GfxContext* Context) {
 	commandBufferInfo.level = vk::CommandBufferLevel::ePrimary;
 	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(render_swapchain.framebuffers.size());
 
-	auto commandBuffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
+	render_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
 
-	if (commandBuffers.empty()) {
+	if (render_command_buffers.empty()) {
 		LOG_ERROR("Failed to allocate command buffers");
 		return;
-	}
-
-	std::vector<CommandBufferWithMutex> tempBuffers(commandBuffers.size());
-	render_command_buffers.swap(tempBuffers);
-
-	for (size_t i = 0; i < commandBuffers.size(); i++) {
-		render_command_buffers[i].command_bufer = commandBuffers[i];
 	}
 
 	/*
@@ -272,7 +265,7 @@ void Renderer::draw_frame() {
 	submitInfo.pWaitSemaphores = waitSemaphores;
 	submitInfo.pWaitDstStageMask = waitStages;
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &render_command_buffers[imageIndex].command_bufer;
+	submitInfo.pCommandBuffers = &render_command_buffers[imageIndex];
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = signalSemaphores;
 
@@ -309,13 +302,12 @@ void Renderer::record_command_buffers() {
 	context->primary_logical_device.waitIdle();
 
 	for (size_t i = 0; i < render_command_buffers.size(); i++) {
-		const std::lock_guard<std::mutex> lock(render_command_buffers[i].mutex);
 
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
 		beginInfo.pInheritanceInfo = nullptr;
 
-		render_command_buffers[i].command_bufer.begin(beginInfo);
+		render_command_buffers[i].begin(beginInfo);
 
 		vk::RenderPassBeginInfo renderPassInfo;
 		renderPassInfo.renderPass = render_swapchain.render_pass;
@@ -329,15 +321,15 @@ void Renderer::record_command_buffers() {
 		renderPassInfo.clearValueCount = 1;
 		renderPassInfo.pClearValues = &clearColor;
 
-		render_command_buffers[i].command_bufer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+		render_command_buffers[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
-		render_command_buffers[i].command_bufer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines[std::hash<std::string>()("base")].pipeline);
+		render_command_buffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines[std::hash<std::string>()("base")].pipeline);
 
-		render_command_buffers[i].command_bufer.draw(3, 1, 0, 0);
+		render_command_buffers[i].draw(3, 1, 0, 0);
 
-		render_command_buffers[i].command_bufer.endRenderPass();
+		render_command_buffers[i].endRenderPass();
 
-		render_command_buffers[i].command_bufer.end();
+		render_command_buffers[i].end();
 	}
 
 	are_command_buffers_recorded = true;
@@ -347,9 +339,7 @@ void Renderer::reset_command_buffers() {
 	context->primary_logical_device.waitIdle();
 
 	for (auto& commandBuffer : render_command_buffers) {
-		const std::lock_guard<std::mutex> lock(commandBuffer.mutex);
-
-		commandBuffer.command_bufer.reset();
+		commandBuffer.reset();
 	}
 
 	are_command_buffers_recorded = false;
