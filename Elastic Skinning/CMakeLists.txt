@@ -14,7 +14,16 @@ set(SOURCE
 	"source/asset.cpp"
 	"include/swapchain.h"
 	"source/swapchain.cpp"
- "include/renderer.h" "source/renderer.cpp" "include/window.h" "source/window.cpp" "include/gfxpipeline.h" "source/gfxpipeline.cpp")
+	"include/renderer.h"
+	"source/renderer.cpp"
+	"include/window.h"
+	"source/window.cpp"
+	"include/gfxpipeline.h"
+	"source/gfxpipeline.cpp"
+	"include/mesh.h"
+	"source/mesh.cpp"
+	"source/vma_impl.cpp"
+)
 
 file(GLOB
 	SHADERS
@@ -36,6 +45,7 @@ target_include_directories(
 	${ProjectName}
 	PUBLIC
 	"include"
+	"../Dependencies/VulkanMemoryAllocator/include"
 )
 
 target_link_libraries(

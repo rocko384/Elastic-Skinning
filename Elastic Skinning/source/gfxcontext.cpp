@@ -366,6 +366,21 @@ void GfxContext::init(Window* Window, const std::string& AppName, const std::str
 	present_queue_family_index = presentQueueFamilyIndex.value();
 
 	/*
+	* VMA allocator creation
+	*/
+
+	VmaAllocatorCreateInfo allocatorInfo{};
+	allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+	allocatorInfo.physicalDevice = primary_physical_device;
+	allocatorInfo.device = primary_logical_device;
+	allocatorInfo.instance = vulkan_instance;
+
+	if (vmaCreateAllocator(&allocatorInfo, &allocator) != VK_SUCCESS) {
+		LOG_ERROR("Failed to create memory allocator");
+		return;
+	}
+
+	/*
 	* Finish initialization
 	*/
 
@@ -374,6 +389,10 @@ void GfxContext::init(Window* Window, const std::string& AppName, const std::str
 
 void GfxContext::deinit() {
 	if (is_initialized()) {
+
+		if (allocator) {
+			vmaDestroyAllocator(allocator);
+		}
 
 		if (primary_logical_device) {
 			primary_logical_device.destroy();

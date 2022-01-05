@@ -5,6 +5,7 @@
 #include "window.h"
 
 #include <vulkan/vulkan.hpp>
+#include <vk_mem_alloc.h>
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
@@ -27,7 +28,7 @@ class GfxContext {
 
 	friend class Renderer;
 	friend class Swapchain;
-	friend class GfxPipeline;
+	friend class GfxPipelineImpl;
 
 public:
 
@@ -37,6 +38,8 @@ public:
 	void deinit();
 
 	bool is_initialized() { return is_init; }
+
+	VmaAllocator allocator;
 
 private:
 

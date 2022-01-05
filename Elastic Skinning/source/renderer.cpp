@@ -96,7 +96,7 @@ void Renderer::init(GfxContext* Context) {
 	}
 
 	/*
-	* Allocate command buffers
+	* Allocate primary command buffers
 	*/
 
 	vk::CommandBufferAllocateInfo commandBufferInfo;
@@ -104,10 +104,10 @@ void Renderer::init(GfxContext* Context) {
 	commandBufferInfo.level = vk::CommandBufferLevel::ePrimary;
 	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(render_swapchain.framebuffers.size());
 
-	render_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
+	primary_render_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
 
-	if (render_command_buffers.empty()) {
-		LOG_ERROR("Failed to allocate command buffers");
+	if (primary_render_command_buffers.empty()) {
+		LOG_ERROR("Failed to allocate primary command buffers");
 		return;
 	}
 
@@ -148,6 +148,10 @@ void Renderer::deinit() {
 	if (is_initialized()) {
 		context->primary_logical_device.waitIdle();
 
+		for (auto& mesh : meshes) {
+			vmaDestroyBuffer(context->allocator, mesh.vertex_buffer, mesh.memory_allocation);
+		}
+
 		for (auto semaphore : image_available_semaphores) {
 			context->primary_logical_device.destroy(semaphore);
 		}
@@ -172,11 +176,11 @@ void Renderer::deinit() {
 	is_init = false;
 }
 
-Renderer::Error Renderer::register_pipeline(const std::string& Name, GfxPipeline&& Pipeline) {
+Renderer::Error Renderer::register_pipeline(const std::string& Name, GfxPipelineImpl&& Pipeline) {
 	return register_pipeline(std::hash<std::string>()(Name), std::move(Pipeline));
 }
 
-Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipeline&& Pipeline) {
+Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipelineImpl&& Pipeline) {
 	if (pipelines.contains(Name)) {
 		return Error::PIPELINE_WITH_NAME_ALREADY_EXISTS;
 	}
@@ -184,38 +188,38 @@ Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipeline&& Pipel
 	pipelines[Name] = std::move(Pipeline);
 	pipelines[Name].deinit();
 
-	GfxPipeline::Error pipelineError;
+	GfxPipelineImpl::Error pipelineError;
 
 	if (pipelines[Name].is_swapchain_dependent()) {
 		pipelineError = pipelines[Name].init(context, &render_swapchain);
 	}
 
 	switch (pipelineError) {
-	case GfxPipeline::Error::INVALID_CONTEXT:
+	case GfxPipelineImpl::Error::INVALID_CONTEXT:
 		LOG_ERROR("Pipeline was given invalid graphics context");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
-	case GfxPipeline::Error::UNINITIALIZED_CONTEXT:
+	case GfxPipelineImpl::Error::UNINITIALIZED_CONTEXT:
 		LOG_ERROR("Pipeline was given uninitalized graphics context");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
-	case GfxPipeline::Error::INVALID_SWAPCHAIN:
+	case GfxPipelineImpl::Error::INVALID_SWAPCHAIN:
 		LOG_ERROR("Pipeline was given invalid swapchain");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
-	case GfxPipeline::Error::UNINITIALIZED_SWAPCHAIN:
+	case GfxPipelineImpl::Error::UNINITIALIZED_SWAPCHAIN:
 		LOG_ERROR("Pipeline was given uninitialized swapchain");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
-	case GfxPipeline::Error::NO_SHADERS:
+	case GfxPipelineImpl::Error::NO_SHADERS:
 		LOG_ERROR("Pipeline was given no shaders");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
-	case GfxPipeline::Error::FAIL_CREATE_PIPELINE_LAYOUT:
+	case GfxPipelineImpl::Error::FAIL_CREATE_PIPELINE_LAYOUT:
 		LOG_ERROR("Failed to create pipeline layout");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
-	case GfxPipeline::Error::FAIL_CREATE_PIPELINE:
+	case GfxPipelineImpl::Error::FAIL_CREATE_PIPELINE:
 		LOG_ERROR("Failed to create graphics pipeline");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
@@ -224,6 +228,66 @@ Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipeline&& Pipel
 	}
 
 	return Error::OK;
+}
+
+Retval<Renderer::MeshId, Renderer::Error> Renderer::digest_mesh(Mesh Mesh) {
+	/*
+	* Create and allocate GPU buffer for vertices
+	*/
+	size_t vertexMemorySize = sizeof(Vertex) * Mesh.vertices.size();
+
+	vk::BufferCreateInfo bufferInfo{};
+	bufferInfo.size = vertexMemorySize;
+	bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
+	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+	VkBufferCreateInfo bufferInfoConv = bufferInfo;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+	InternalMesh digestedMesh;
+	digestedMesh.pipeline_hash = std::hash<std::string>()(Mesh.pipeline_name);
+	digestedMesh.vertex_count = Mesh.vertices.size();
+	
+	VkBuffer buffer;
+	VmaAllocation allocation;
+
+	VkResult result = vmaCreateBuffer(context->allocator, &bufferInfoConv, &allocateInfo, &buffer, &allocation, nullptr);
+
+	if (result != VK_SUCCESS) {
+		return { 0, Error::FAILED_TO_ALLOCATE_BUFFER };
+	}
+
+	digestedMesh.vertex_buffer = buffer;
+	digestedMesh.memory_allocation = allocation;
+
+	/*
+	* Map GPU buffer and assign vertex data
+	*/
+	void* data;
+	vmaMapMemory(context->allocator, digestedMesh.memory_allocation, &data);
+	std::memcpy(data, Mesh.vertices.data(), vertexMemorySize);
+	vmaUnmapMemory(context->allocator, digestedMesh.memory_allocation);
+
+	vmaFlushAllocation(context->allocator, digestedMesh.memory_allocation, 0, vertexMemorySize);
+
+	/*
+	* Allocate command buffers
+	*/
+	vk::CommandBufferAllocateInfo commandBufferInfo;
+	commandBufferInfo.commandPool = command_pool;
+	commandBufferInfo.level = vk::CommandBufferLevel::eSecondary;
+	commandBufferInfo.commandBufferCount = 1;
+
+	digestedMesh.render_command_buffer = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo)[0];
+
+	if (!digestedMesh.render_command_buffer) {
+		return { 0, Error::FAILED_TO_ALLOCATE_COMMAND_BUFFERS };
+	}
+
+	meshes.push_back(digestedMesh);
+
+	return { meshes.size() - 1, Error::OK };
 }
 
 void Renderer::draw_frame() {
@@ -265,13 +329,14 @@ void Renderer::draw_frame() {
 	submitInfo.pWaitSemaphores = waitSemaphores;
 	submitInfo.pWaitDstStageMask = waitStages;
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &render_command_buffers[imageIndex];
+	submitInfo.pCommandBuffers = &primary_render_command_buffers[imageIndex];
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = signalSemaphores;
 
 	context->primary_logical_device.resetFences(currentFences);
 
 	context->primary_queue.submit({ submitInfo }, in_flight_fences[current_frame]);
+
 
 	vk::SwapchainKHR swapChains[] = { render_swapchain.swapchain };
 
@@ -284,7 +349,7 @@ void Renderer::draw_frame() {
 	presentInfo.pResults = nullptr;
 
 	vk::Result presentStatus = context->present_queue.presentKHR(presentInfo);
-	
+
 	if (presentStatus != vk::Result::eSuccess) {
 		LOG_ERROR("Swapchain presentation failure");
 	}
@@ -301,13 +366,43 @@ bool Renderer::should_render() {
 void Renderer::record_command_buffers() {
 	context->primary_logical_device.waitIdle();
 
-	for (size_t i = 0; i < render_command_buffers.size(); i++) {
+	std::vector<vk::CommandBuffer> secondary_command_buffers;
+
+	for (auto& mesh : meshes) {
+		vk::CommandBufferInheritanceInfo inheritanceInfo;
+		inheritanceInfo.renderPass = render_swapchain.render_pass;
+		inheritanceInfo.subpass = 0;
+		inheritanceInfo.framebuffer = nullptr;
+		inheritanceInfo.occlusionQueryEnable = VK_FALSE;
+		inheritanceInfo.queryFlags = vk::QueryControlFlagBits(0);
+		inheritanceInfo.pipelineStatistics = vk::QueryPipelineStatisticFlagBits(0);
+
+		vk::CommandBufferBeginInfo beginInfo;
+		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse | vk::CommandBufferUsageFlagBits::eRenderPassContinue;
+		beginInfo.pInheritanceInfo = &inheritanceInfo;
+
+		mesh.render_command_buffer.begin(beginInfo);
+
+		mesh.render_command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines[mesh.pipeline_hash].pipeline);
+
+		std::array < vk::Buffer, 1> vertexBuffers = { mesh.vertex_buffer };
+		std::array<vk::DeviceSize, 1> offsets = { 0 };
+		mesh.render_command_buffer.bindVertexBuffers(0, vertexBuffers, offsets);
+
+		mesh.render_command_buffer.draw(static_cast<uint32_t>(mesh.vertex_count), 1, 0, 0);
+
+		mesh.render_command_buffer.end();
+
+		secondary_command_buffers.push_back(mesh.render_command_buffer);
+	}
+
+	for (size_t i = 0; i < primary_render_command_buffers.size(); i++) {
 
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
 		beginInfo.pInheritanceInfo = nullptr;
 
-		render_command_buffers[i].begin(beginInfo);
+		primary_render_command_buffers[i].begin(beginInfo);
 
 		vk::RenderPassBeginInfo renderPassInfo;
 		renderPassInfo.renderPass = render_swapchain.render_pass;
@@ -316,20 +411,18 @@ void Renderer::record_command_buffers() {
 		renderPassInfo.renderArea.extent = render_swapchain.extent;
 
 		vk::ClearValue clearColor;
-		clearColor.color.float32 = { { 0.1f, 0.1f, 0.1f, 0.0f } };
+		clearColor.color.float32 = { { 0.0f, 0.0f, 0.0f, 1.0f } };
 
 		renderPassInfo.clearValueCount = 1;
 		renderPassInfo.pClearValues = &clearColor;
 
-		render_command_buffers[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+		primary_render_command_buffers[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
 
-		render_command_buffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines[std::hash<std::string>()("base")].pipeline);
+		primary_render_command_buffers[i].executeCommands(secondary_command_buffers);
 
-		render_command_buffers[i].draw(3, 1, 0, 0);
+		primary_render_command_buffers[i].endRenderPass();
 
-		render_command_buffers[i].endRenderPass();
-
-		render_command_buffers[i].end();
+		primary_render_command_buffers[i].end();
 	}
 
 	are_command_buffers_recorded = true;
@@ -338,7 +431,11 @@ void Renderer::record_command_buffers() {
 void Renderer::reset_command_buffers() {
 	context->primary_logical_device.waitIdle();
 
-	for (auto& commandBuffer : render_command_buffers) {
+	for (auto& mesh : meshes) {
+		mesh.render_command_buffer.reset();
+	}
+
+	for (auto& commandBuffer : primary_render_command_buffers) {
 		commandBuffer.reset();
 	}
 

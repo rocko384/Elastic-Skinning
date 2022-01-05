@@ -2,21 +2,23 @@
 
 #include <vector>
 
-GfxPipeline::GfxPipeline(GfxPipeline&& rhs) noexcept {
+GfxPipelineImpl::GfxPipelineImpl(GfxPipelineImpl&& rhs) noexcept {
 	this->operator=(std::move(rhs));
 }
 
-GfxPipeline::~GfxPipeline() {
+GfxPipelineImpl::~GfxPipelineImpl() {
 	deinit();
 }
 
-GfxPipeline& GfxPipeline::operator=(GfxPipeline&& rhs) noexcept {
+GfxPipelineImpl& GfxPipelineImpl::operator=(GfxPipelineImpl&& rhs) noexcept {
 	this->pipeline_layout = rhs.pipeline_layout;
 	this->pipeline = rhs.pipeline;
 	this->is_init = rhs.is_init;
 	this->should_init_with_swapchain = rhs.should_init_with_swapchain;
 	this->context = rhs.context;
 	this->swapchain = rhs.swapchain;
+	this->vertex_binding_description = rhs.vertex_binding_description;
+	this->vertex_attribute_descriptions = rhs.vertex_attribute_descriptions;
 	this->vertex_shader_path = rhs.vertex_shader_path;
 	this->tessellation_control_shader_path = rhs.tessellation_control_shader_path;
 	this->tessellation_eval_shader_path = rhs.tessellation_eval_shader_path;
@@ -29,6 +31,8 @@ GfxPipeline& GfxPipeline::operator=(GfxPipeline&& rhs) noexcept {
 	rhs.should_init_with_swapchain = true;
 	rhs.context = nullptr;
 	rhs.swapchain = nullptr;
+	rhs.vertex_binding_description = vk::VertexInputBindingDescription{};
+	rhs.vertex_attribute_descriptions.clear();
 	rhs.vertex_shader_path.clear();
 	rhs.tessellation_control_shader_path.clear();
 	rhs.tessellation_eval_shader_path.clear();
@@ -38,44 +42,44 @@ GfxPipeline& GfxPipeline::operator=(GfxPipeline&& rhs) noexcept {
 	return *this;
 }
 
-GfxPipeline& GfxPipeline::set_vertex_shader(std::filesystem::path path) {
+GfxPipelineImpl& GfxPipelineImpl::set_vertex_shader(std::filesystem::path path) {
 	vertex_shader_path = path;
 
 	return *this;
 }
 
-GfxPipeline& GfxPipeline::set_tessellation_control_shader(std::filesystem::path path) {
+GfxPipelineImpl& GfxPipelineImpl::set_tessellation_control_shader(std::filesystem::path path) {
 	tessellation_control_shader_path = path;
 
 	return *this;
 }
 
-GfxPipeline& GfxPipeline::set_tessellation_eval_shader(std::filesystem::path path) {
+GfxPipelineImpl& GfxPipelineImpl::set_tessellation_eval_shader(std::filesystem::path path) {
 	tessellation_eval_shader_path = path;
 
 	return *this;
 }
 
-GfxPipeline& GfxPipeline::set_geometry_shader(std::filesystem::path path) {
+GfxPipelineImpl& GfxPipelineImpl::set_geometry_shader(std::filesystem::path path) {
 	geometry_shader_path = path;
 
 	return *this;
 }
 
-GfxPipeline& GfxPipeline::set_fragment_shader(std::filesystem::path path) {
+GfxPipelineImpl& GfxPipelineImpl::set_fragment_shader(std::filesystem::path path) {
 	fragment_shader_path = path;
 
 	return *this;
 }
 
-GfxPipeline& GfxPipeline::set_target(/* RenderTarget Target */) {
+GfxPipelineImpl& GfxPipelineImpl::set_target(/* RenderTarget Target */) {
 	should_init_with_swapchain = false;
 
 	return *this;
 }
 
 
-GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) {
+GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swapchain) {
 	if (!Context) {
 		return Error::INVALID_CONTEXT;
 	}
@@ -171,10 +175,10 @@ GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) 
 
 	// Vertex input definition
 	vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
-	vertexInputInfo.vertexBindingDescriptionCount = 0;
-	vertexInputInfo.pVertexBindingDescriptions = nullptr;
-	vertexInputInfo.vertexAttributeDescriptionCount = 0;
-	vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+	vertexInputInfo.vertexBindingDescriptionCount = 1;
+	vertexInputInfo.pVertexBindingDescriptions = &vertex_binding_description;
+	vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertex_attribute_descriptions.size());
+	vertexInputInfo.pVertexAttributeDescriptions = vertex_attribute_descriptions.data();
 
 	// Input assembly definition
 	vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo;
@@ -306,7 +310,7 @@ GfxPipeline::Error GfxPipeline::init(GfxContext* Context, Swapchain* Swapchain) 
 	return Error::OK;
 }
 
-GfxPipeline::Error GfxPipeline::reinit() {
+GfxPipelineImpl::Error GfxPipelineImpl::reinit() {
 	deinit();
 
 	if (is_swapchain_dependent()) {
@@ -316,7 +320,7 @@ GfxPipeline::Error GfxPipeline::reinit() {
 	return Error::OK;
 }
 
-void GfxPipeline::deinit() {
+void GfxPipelineImpl::deinit() {
 	if (is_initialized()) {
 		context->primary_logical_device.destroy(pipeline);
 		context->primary_logical_device.destroy(pipeline_layout);

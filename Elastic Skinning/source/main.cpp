@@ -19,12 +19,31 @@ int main(int argc, char** argv) {
 	Renderer renderer;
 	renderer.init(&context);
 
-	GfxPipeline base_pipeline;
+	GfxPipeline<Vertex> base_pipeline;
 	base_pipeline
 		.set_vertex_shader("shaders/base.vert.bin")
 		.set_fragment_shader("shaders/base.frag.bin");
 
 	renderer.register_pipeline("base", std::move(base_pipeline));
+
+	Mesh triangle;
+	triangle.vertices = {
+		{{-0.25f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+		{{0.25f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+		{{-0.75f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+	};
+	triangle.pipeline_name = "base";
+
+	Mesh triangle2;
+	triangle2.vertices = {
+		{{0.25f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+		{{0.75f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+		{{-0.25f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+	};
+	triangle2.pipeline_name = "base";
+
+	renderer.digest_mesh(triangle);
+	renderer.digest_mesh(triangle2);
 
 	while (!window.should_close()) {
 		window.poll_events();

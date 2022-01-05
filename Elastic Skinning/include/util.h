@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <concepts>
+#include <type_traits>
 #include <cstdio>
 
 template <typename VALUE_TYPE, typename STATUS_TYPE>
@@ -9,6 +11,13 @@ struct Retval {
 };
 
 using StringHash = size_t;
+
+template <typename T>
+concept ArrayType =
+	requires (T a) {
+		{a.size()} -> std::integral;
+		{a[0]} -> std::same_as<typename T::reference>;
+	};
 
 #define LOG(format, ...) \
 	fprintf(stdout, "\33[38;5;75m"); \
