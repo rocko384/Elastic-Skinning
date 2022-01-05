@@ -81,16 +81,27 @@ void Renderer::init(GfxContext* Context) {
 	max_frames_in_flight = render_swapchain.framebuffers.size();
 
 	/*
-	* Create command pool
+	* Create command pools
 	*/
 
 	vk::CommandPoolCreateInfo poolInfo;
 	poolInfo.queueFamilyIndex = context->primary_queue_family_index;
-	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient;
+	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
 
 	command_pool = context->primary_logical_device.createCommandPool(poolInfo);
 
 	if (!command_pool) {
+		LOG_ERROR("Failed to create command pool");
+		return;
+	}
+
+	vk::CommandPoolCreateInfo memoryPoolInfo;
+	memoryPoolInfo.queueFamilyIndex = context->primary_queue_family_index;
+	memoryPoolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+
+	memory_transfer_command_pool = context->primary_logical_device.createCommandPool(memoryPoolInfo);
+
+	if (!memory_transfer_command_pool) {
 		LOG_ERROR("Failed to create command pool");
 		return;
 	}
@@ -165,6 +176,7 @@ void Renderer::deinit() {
 		}
 
 		context->primary_logical_device.destroy(command_pool);
+		context->primary_logical_device.destroy(memory_transfer_command_pool);
 
 		for (auto& pipeline : pipelines) {
 			pipeline.second.deinit();
@@ -238,12 +250,12 @@ Retval<Renderer::MeshId, Renderer::Error> Renderer::digest_mesh(Mesh Mesh) {
 
 	vk::BufferCreateInfo bufferInfo{};
 	bufferInfo.size = vertexMemorySize;
-	bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
+	bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst;
 	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
 	VkBufferCreateInfo bufferInfoConv = bufferInfo;
 
 	VmaAllocationCreateInfo allocateInfo{};
-	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
 
 	InternalMesh digestedMesh;
 	digestedMesh.pipeline_hash = std::hash<std::string>()(Mesh.pipeline_name);
@@ -261,15 +273,7 @@ Retval<Renderer::MeshId, Renderer::Error> Renderer::digest_mesh(Mesh Mesh) {
 	digestedMesh.vertex_buffer = buffer;
 	digestedMesh.memory_allocation = allocation;
 
-	/*
-	* Map GPU buffer and assign vertex data
-	*/
-	void* data;
-	vmaMapMemory(context->allocator, digestedMesh.memory_allocation, &data);
-	std::memcpy(data, Mesh.vertices.data(), vertexMemorySize);
-	vmaUnmapMemory(context->allocator, digestedMesh.memory_allocation);
-
-	vmaFlushAllocation(context->allocator, digestedMesh.memory_allocation, 0, vertexMemorySize);
+	upload_to_gpu_buffer(digestedMesh.vertex_buffer, Mesh.vertices.data(), vertexMemorySize);
 
 	/*
 	* Allocate command buffers
@@ -441,6 +445,71 @@ void Renderer::reset_command_buffers() {
 
 	are_command_buffers_recorded = false;
 }
+
+void Renderer::transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::DeviceSize Size) {
+	vk::CommandBufferAllocateInfo commandAllocInfo;
+	commandAllocInfo.level = vk::CommandBufferLevel::ePrimary;
+	commandAllocInfo.commandPool = memory_transfer_command_pool;
+	commandAllocInfo.commandBufferCount = 1;
+
+	vk::CommandBuffer transferCommandBuffer = context->primary_logical_device.allocateCommandBuffers(commandAllocInfo)[0];
+
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+	transferCommandBuffer.begin(beginInfo);
+
+	vk::BufferCopy copyRegion;
+	copyRegion.srcOffset = 0;
+	copyRegion.dstOffset = 0;
+	copyRegion.size = Size;
+
+	transferCommandBuffer.copyBuffer(Source, Dest, copyRegion);
+
+	transferCommandBuffer.end();
+
+	vk::SubmitInfo submitInfo;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &transferCommandBuffer;
+
+	context->primary_queue.submit(submitInfo, nullptr);
+	context->primary_queue.waitIdle();
+
+	context->primary_logical_device.freeCommandBuffers(memory_transfer_command_pool, transferCommandBuffer);
+}
+
+void Renderer::upload_to_gpu_buffer(vk::Buffer Dest, void* Source, size_t Size) {
+	vk::BufferCreateInfo bufferInfo{};
+	bufferInfo.size = Size;
+	bufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+	VkBufferCreateInfo bufferInfoConv = bufferInfo;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY;
+
+	VkBuffer cpuBuffer;
+	VmaAllocation allocation;
+
+	VkResult result = vmaCreateBuffer(context->allocator, &bufferInfoConv, &allocateInfo, &cpuBuffer, &allocation, nullptr);
+
+	if (result != VK_SUCCESS) {
+		LOG_ERROR("Failed to allocate buffer");
+		return;
+	}
+
+	void* data;
+	vmaMapMemory(context->allocator, allocation, &data);
+	std::memcpy(data, Source, Size);
+	vmaUnmapMemory(context->allocator, allocation);
+
+	vmaFlushAllocation(context->allocator, allocation, 0, Size);
+
+	transfer_buffer_memory(Dest, cpuBuffer, Size);
+
+	vmaDestroyBuffer(context->allocator, cpuBuffer, allocation);
+}
+
 
 void Renderer::window_resized_callback(size_t w, size_t h) {
 	window_restored_callback();

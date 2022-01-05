@@ -49,6 +49,9 @@ private:
 	void record_command_buffers();
 	void reset_command_buffers();
 
+	void transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::DeviceSize Size);
+	void upload_to_gpu_buffer(vk::Buffer Dest, void* Source, size_t Size);
+
 	void window_resized_callback(size_t w, size_t h);
 	void window_minimized_callback();
 	void window_maximized_callback();
@@ -73,6 +76,7 @@ private:
 	std::vector<InternalMesh> meshes;
 
 	vk::CommandPool command_pool;
+	vk::CommandPool memory_transfer_command_pool;
 	std::vector<vk::CommandBuffer> primary_render_command_buffers;
 	bool are_command_buffers_recorded{ false };
 
