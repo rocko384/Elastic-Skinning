@@ -49,8 +49,7 @@ private:
 	void record_command_buffers();
 	void reset_command_buffers();
 
-	void transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::DeviceSize Size);
-	void upload_to_gpu_buffer(vk::Buffer Dest, void* Source, size_t Size);
+	
 
 	void window_resized_callback(size_t w, size_t h);
 	void window_minimized_callback();
@@ -66,17 +65,22 @@ private:
 	std::unordered_map<StringHash, GfxPipelineImpl> pipelines;
 
 	struct InternalMesh {
-		StringHash pipeline_hash;
-		size_t vertex_count;
-		vk::Buffer vertex_buffer;
-		VmaAllocation memory_allocation;
-		vk::CommandBuffer render_command_buffer;
+		StringHash pipeline_hash{ 0 };
+
+		size_t vertex_count{ 0 };
+		vk::Buffer vertex_buffer{ nullptr };
+		VmaAllocation vertex_allocation{ nullptr };
+
+		size_t index_count{ 0 };
+		vk::Buffer index_buffer{ nullptr };
+		VmaAllocation index_allocation{ nullptr };
+
+		vk::CommandBuffer render_command_buffer{ nullptr };
 	};
 
 	std::vector<InternalMesh> meshes;
 
 	vk::CommandPool command_pool;
-	vk::CommandPool memory_transfer_command_pool;
 	std::vector<vk::CommandBuffer> primary_render_command_buffers;
 	bool are_command_buffers_recorded{ false };
 

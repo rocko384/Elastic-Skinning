@@ -381,6 +381,21 @@ void GfxContext::init(Window* Window, const std::string& AppName, const std::str
 	}
 
 	/*
+	* Create memory transfer command pool
+	*/
+
+	vk::CommandPoolCreateInfo memoryPoolInfo;
+	memoryPoolInfo.queueFamilyIndex = primary_queue_family_index;
+	memoryPoolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+
+	memory_transfer_command_pool = primary_logical_device.createCommandPool(memoryPoolInfo);
+
+	if (!memory_transfer_command_pool) {
+		LOG_ERROR("Failed to create command pool");
+		return;
+	}
+
+	/*
 	* Finish initialization
 	*/
 
@@ -389,6 +404,8 @@ void GfxContext::init(Window* Window, const std::string& AppName, const std::str
 
 void GfxContext::deinit() {
 	if (is_initialized()) {
+
+		primary_logical_device.destroy(memory_transfer_command_pool);
 
 		if (allocator) {
 			vmaDestroyAllocator(allocator);
@@ -410,6 +427,70 @@ void GfxContext::deinit() {
 	}
 
 	is_init = false;
+}
+
+void GfxContext::transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::DeviceSize Size) {
+	vk::CommandBufferAllocateInfo commandAllocInfo;
+	commandAllocInfo.level = vk::CommandBufferLevel::ePrimary;
+	commandAllocInfo.commandPool = memory_transfer_command_pool;
+	commandAllocInfo.commandBufferCount = 1;
+
+	vk::CommandBuffer transferCommandBuffer = primary_logical_device.allocateCommandBuffers(commandAllocInfo)[0];
+
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+	transferCommandBuffer.begin(beginInfo);
+
+	vk::BufferCopy copyRegion;
+	copyRegion.srcOffset = 0;
+	copyRegion.dstOffset = 0;
+	copyRegion.size = Size;
+
+	transferCommandBuffer.copyBuffer(Source, Dest, copyRegion);
+
+	transferCommandBuffer.end();
+
+	vk::SubmitInfo submitInfo;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &transferCommandBuffer;
+
+	primary_queue.submit(submitInfo, nullptr);
+	primary_queue.waitIdle();
+
+	primary_logical_device.freeCommandBuffers(memory_transfer_command_pool, transferCommandBuffer);
+}
+
+void GfxContext::upload_to_gpu_buffer(vk::Buffer Dest, void* Source, size_t Size) {
+	vk::BufferCreateInfo bufferInfo{};
+	bufferInfo.size = Size;
+	bufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+	VkBufferCreateInfo bufferInfoConv = bufferInfo;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY;
+
+	VkBuffer cpuBuffer;
+	VmaAllocation allocation;
+
+	VkResult result = vmaCreateBuffer(allocator, &bufferInfoConv, &allocateInfo, &cpuBuffer, &allocation, nullptr);
+
+	if (result != VK_SUCCESS) {
+		LOG_ERROR("Failed to allocate buffer");
+		return;
+	}
+
+	void* data;
+	vmaMapMemory(allocator, allocation, &data);
+	std::memcpy(data, Source, Size);
+	vmaUnmapMemory(allocator, allocation);
+
+	vmaFlushAllocation(allocator, allocation, 0, Size);
+
+	transfer_buffer_memory(Dest, cpuBuffer, Size);
+
+	vmaDestroyBuffer(allocator, cpuBuffer, allocation);
 }
 
 vk::ShaderModule GfxContext::create_shader_module(std::filesystem::path path) {

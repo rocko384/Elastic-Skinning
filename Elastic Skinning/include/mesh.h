@@ -9,6 +9,7 @@
 #include <array>
 #include <concepts>
 #include <type_traits>
+#include <cstdint>
 
 template <typename T>
 concept VertexType =
@@ -51,8 +52,12 @@ struct Vertex {
 };
 
 struct Mesh {
-	
-	std::vector<Vertex> vertices;
+
+	using VertexType = Vertex;
+	using IndexType = uint32_t;
+
 	std::string pipeline_name;
+	std::vector<VertexType> vertices;
+	std::vector<IndexType> indices;
 
 };

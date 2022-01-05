@@ -27,23 +27,42 @@ int main(int argc, char** argv) {
 	renderer.register_pipeline("base", std::move(base_pipeline));
 
 	Mesh triangle;
+	triangle.pipeline_name = "base";
 	triangle.vertices = {
 		{{-0.25f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}},
 		{{0.25f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
 		{{-0.75f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
 	};
-	triangle.pipeline_name = "base";
+	triangle.indices = {
+		0, 1, 2
+	};
 
 	Mesh triangle2;
+	triangle2.pipeline_name = "base";
 	triangle2.vertices = {
 		{{0.25f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
 		{{0.75f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
 		{{-0.25f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
 	};
-	triangle2.pipeline_name = "base";
+	triangle2.indices = {
+		0, 1, 2
+	};
+
+	Mesh square;
+	square.pipeline_name = "base";
+	square.vertices = {
+		{{-0.25f, -0.25f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+		{{0.25f, -0.25f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+		{{0.25f, 0.25f, 0.0f}, {0.0f, 0.0f, 1.0f}},
+		{{-0.25f, 0.25f, 0.0f}, {1.0f, 1.0f, 0.0f}}
+	};
+	square.indices = {
+		0, 1, 2, 2, 3, 0
+	};
 
 	renderer.digest_mesh(triangle);
 	renderer.digest_mesh(triangle2);
+	renderer.digest_mesh(square);
 
 	while (!window.should_close()) {
 		window.poll_events();

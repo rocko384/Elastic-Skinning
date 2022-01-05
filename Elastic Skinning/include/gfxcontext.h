@@ -39,12 +39,15 @@ public:
 
 	bool is_initialized() { return is_init; }
 
-	VmaAllocator allocator;
-
-private:
+	void transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::DeviceSize Size);
+	void upload_to_gpu_buffer(vk::Buffer Dest, void* Source, size_t Size);
 
 	vk::ShaderModule create_shader_module(std::filesystem::path path);
 	vk::ShaderModule create_shader_module(const BinaryBlob& code);
+
+	VmaAllocator allocator;
+
+private:
 
 	bool is_init{ false };
 
@@ -61,4 +64,6 @@ private:
 	uint32_t primary_queue_family_index;
 	vk::Queue present_queue;
 	uint32_t present_queue_family_index;
+
+	vk::CommandPool memory_transfer_command_pool;
 };
