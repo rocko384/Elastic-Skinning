@@ -30,11 +30,12 @@ int main(int argc, char** argv) {
 
 	Mesh triangle;
 	ModelTransform t1;
+	t1.position.x = -0.5;
 	triangle.pipeline_name = "base";
 	triangle.vertices = {
-		{{-0.25f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}},
-		{{0.25f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{-0.75f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+		{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
 	};
 	triangle.indices = {
 		0, 1, 2
@@ -42,11 +43,12 @@ int main(int argc, char** argv) {
 
 	Mesh triangle2;
 	ModelTransform t2;
+	t2.position.x = 0.5;
 	triangle2.pipeline_name = "base";
 	triangle2.vertices = {
-		{{0.25f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		{{0.75f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{-0.25f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+		{{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
 	};
 	triangle2.indices = {
 		0, 1, 2
