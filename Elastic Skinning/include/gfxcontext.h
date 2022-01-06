@@ -24,9 +24,14 @@
 #define VULKAN_VALIDATION_LAYERS \
 	"VK_LAYER_KHRONOS_validation"
 
+struct BufferAllocation {
+	vk::Buffer buffer;
+	VmaAllocation allocation;
+};
+
 class GfxContext {
 
-	friend class Renderer;
+	friend class RendererImpl;
 	friend class Swapchain;
 	friend class GfxPipelineImpl;
 
@@ -39,8 +44,15 @@ public:
 
 	bool is_initialized() { return is_init; }
 
-	void transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::DeviceSize Size);
-	void upload_to_gpu_buffer(vk::Buffer Dest, void* Source, size_t Size);
+	BufferAllocation create_vertex_buffer(vk::DeviceSize Size);
+	BufferAllocation create_index_buffer(vk::DeviceSize Size);
+	BufferAllocation create_transfer_buffer(vk::DeviceSize Size);
+	BufferAllocation create_uniform_buffer(vk::DeviceSize Size);
+	BufferAllocation create_storage_buffer(vk::DeviceSize Size);
+	void destroy_buffer(BufferAllocation Buffer);
+
+	void transfer_buffer_memory(BufferAllocation Dest, BufferAllocation Source, vk::DeviceSize Size);
+	void upload_to_gpu_buffer(BufferAllocation Dest, void* Source, size_t Size);
 
 	vk::ShaderModule create_shader_module(std::filesystem::path path);
 	vk::ShaderModule create_shader_module(const BinaryBlob& code);

@@ -11,8 +11,12 @@ GfxPipelineImpl::~GfxPipelineImpl() {
 }
 
 GfxPipelineImpl& GfxPipelineImpl::operator=(GfxPipelineImpl&& rhs) noexcept {
+	this->descriptor_set_layout = rhs.descriptor_set_layout;
 	this->pipeline_layout = rhs.pipeline_layout;
 	this->pipeline = rhs.pipeline;
+	this->buffer_type_names = rhs.buffer_type_names;
+	this->buffer_layout_bindings = rhs.buffer_layout_bindings;
+
 	this->is_init = rhs.is_init;
 	this->should_init_with_swapchain = rhs.should_init_with_swapchain;
 	this->context = rhs.context;
@@ -25,8 +29,12 @@ GfxPipelineImpl& GfxPipelineImpl::operator=(GfxPipelineImpl&& rhs) noexcept {
 	this->geometry_shader_path = rhs.geometry_shader_path;
 	this->fragment_shader_path = rhs.fragment_shader_path;
 
+	rhs.descriptor_set_layout = nullptr;
 	rhs.pipeline_layout = nullptr;
 	rhs.pipeline = nullptr;
+	rhs.buffer_type_names.clear();
+	rhs.buffer_layout_bindings.clear();
+
 	rhs.is_init = false;
 	rhs.should_init_with_swapchain = true;
 	rhs.context = nullptr;
@@ -261,12 +269,32 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 	dynamicStateInfo.dynamicStateCount = 2;
 	dynamicStateInfo.pDynamicStates = dynamicStates;
 
+	// Descriptor set layout
+	std::vector<vk::DescriptorSetLayoutBinding> layoutBindings;
+
+	for (auto& binding : buffer_layout_bindings) {
+		layoutBindings.push_back(binding.second);
+	}
+
+	vk::DescriptorSetLayoutCreateInfo descriptorLayoutInfo;
+	descriptorLayoutInfo.bindingCount = layoutBindings.size();
+	descriptorLayoutInfo.pBindings = layoutBindings.data();
+
+	descriptor_set_layout = context->primary_logical_device.createDescriptorSetLayout(descriptorLayoutInfo);
+
+	if (!descriptor_set_layout) {
+		return Error::FAIL_CREATE_DESCRIPTOR_SET_LAYOUT;
+	}
+
+	// Push constant ranges
+	std::vector<vk::PushConstantRange> pushConstantRanges{ mesh_id_push_constant };
+
 	// Pipeline layout
 	vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
-	pipelineLayoutInfo.setLayoutCount = 0;
-	pipelineLayoutInfo.pSetLayouts = nullptr;
-	pipelineLayoutInfo.pushConstantRangeCount = 0;
-	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &descriptor_set_layout;
+	pipelineLayoutInfo.pushConstantRangeCount = pushConstantRanges.size();
+	pipelineLayoutInfo.pPushConstantRanges = pushConstantRanges.data();
 
 	vk::PipelineLayout pipelineLayout = context->primary_logical_device.createPipelineLayout(pipelineLayoutInfo);
 
@@ -305,6 +333,7 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 		context->primary_logical_device.destroy(shader);
 	}
 
+
 	is_init = true;
 
 	return Error::OK;
@@ -324,6 +353,7 @@ void GfxPipelineImpl::deinit() {
 	if (is_initialized()) {
 		context->primary_logical_device.destroy(pipeline);
 		context->primary_logical_device.destroy(pipeline_layout);
+		context->primary_logical_device.destroy(descriptor_set_layout);
 	}
 
 	is_init = false;

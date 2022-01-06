@@ -49,6 +49,20 @@ void Window::deinit() {
 	is_init = false;
 }
 
+Window::Dimensions Window::get_dimensions() {
+	int w;
+	int h;
+	SDL_GetWindowSize(window, &w, &h);
+
+	return { static_cast<size_t>(w), static_cast<size_t>(h) };
+}
+
+float Window::get_aspect_ratio() {
+	auto d = get_dimensions();
+
+	return static_cast<float>(d.width) / static_cast<float>(d.height);
+}
+
 void Window::poll_events() {
 	SDL_Event e;
 

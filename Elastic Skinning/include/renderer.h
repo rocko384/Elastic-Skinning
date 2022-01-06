@@ -3,6 +3,7 @@
 #include "util.h"
 #include "gfxcontext.h"
 #include "swapchain.h"
+#include "renderingtypes.h"
 #include "gfxpipeline.h"
 #include "mesh.h"
 
@@ -14,7 +15,7 @@
 #include <functional>
 #include <cstdint>
 
-class Renderer {
+class RendererImpl {
 
 public:
 
@@ -26,9 +27,9 @@ public:
 		FAILED_TO_ALLOCATE_COMMAND_BUFFERS
 	};
 
-	using MeshId = size_t;
+	using MeshId = uint32_t;
 
-	~Renderer();
+	~RendererImpl();
 
 	void init(GfxContext* Context);
 	void deinit();
@@ -38,18 +39,23 @@ public:
 	Error register_pipeline(const std::string& Name, GfxPipelineImpl&& Pipeline);
 	Error register_pipeline(StringHash Name, GfxPipelineImpl&& Pipeline);
 
-	Retval<MeshId, Error> digest_mesh(Mesh Mesh);
+	Retval<MeshId, Error> digest_mesh(Mesh Mesh, ModelTransform* Transform);
+
+	void set_camera(Camera* Camera);
 
 	void draw_frame();
 
-private:
+protected:
 
 	bool should_render();
+
+	void update_frame_data(uint32_t ImageIdx);
+
+	void finish_mesh_digestion();
 
 	void record_command_buffers();
 	void reset_command_buffers();
 
-	
 
 	void window_resized_callback(size_t w, size_t h);
 	void window_minimized_callback();
@@ -64,21 +70,30 @@ private:
 
 	std::unordered_map<StringHash, GfxPipelineImpl> pipelines;
 
+	vk::DescriptorPool descriptor_pool;
+	// descriptor_sets[Pipeline Name][Swapchain Image #]
+	std::unordered_map<StringHash, std::vector<vk::DescriptorSet>> descriptor_sets;
+
+	std::vector<StringHash> ubo_type_names;
+	std::unordered_map<StringHash, size_t> ubo_type_sizes;
+	std::unordered_map<StringHash, bool> ubo_type_is_per_mesh;
+	// frame_data_buffers[Buffer Type][Swapchain Image #]
+	std::unordered_map<StringHash, std::vector<BufferAllocation>> frame_data_buffers;
+
 	struct InternalMesh {
 		StringHash pipeline_hash{ 0 };
 
 		size_t vertex_count{ 0 };
-		vk::Buffer vertex_buffer{ nullptr };
-		VmaAllocation vertex_allocation{ nullptr };
+		BufferAllocation vertex_buffer;
 
 		size_t index_count{ 0 };
-		vk::Buffer index_buffer{ nullptr };
-		VmaAllocation index_allocation{ nullptr };
-
-		vk::CommandBuffer render_command_buffer{ nullptr };
+		BufferAllocation index_buffer;
 	};
 
 	std::vector<InternalMesh> meshes;
+	std::vector<ModelTransform*> mesh_transforms;
+
+	Camera* current_camera{ nullptr };
 
 	vk::CommandPool command_pool;
 	std::vector<vk::CommandBuffer> primary_render_command_buffers;
@@ -92,4 +107,23 @@ private:
 	std::vector<vk::Fence> in_flight_fences;
 	std::vector<vk::Fence> images_in_flight;
 
+};
+
+template <BufferObjectType... SupportedBufferTypes>
+class Renderer : public RendererImpl {
+	
+public:
+
+	Renderer() {
+		std::vector<StringHash> names = { (SupportedBufferTypes::name())... };
+		std::vector<size_t> sizes = { (sizeof(SupportedBufferTypes))... };
+		std::vector<bool> perMesh = { (SupportedBufferTypes::is_per_mesh())... };
+
+		for (size_t i = 0; i < names.size(); i++) {
+			ubo_type_sizes[names[i]] = sizes[i];
+			ubo_type_is_per_mesh[names[i]] = perMesh[i];
+		}
+
+		ubo_type_names = names;
+	}
 };

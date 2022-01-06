@@ -2,11 +2,14 @@
 
 #include "gfxcontext.h"
 #include "swapchain.h"
+#include "renderingtypes.h"
 #include "mesh.h"
 
 #include <vulkan/vulkan.hpp>
 
 #include <filesystem>
+#include <vector>
+#include <unordered_map>
 
 struct GfxPipelineImpl {
 
@@ -17,6 +20,7 @@ struct GfxPipelineImpl {
 		INVALID_SWAPCHAIN,
 		UNINITIALIZED_SWAPCHAIN,
 		NO_SHADERS,
+		FAIL_CREATE_DESCRIPTOR_SET_LAYOUT,
 		FAIL_CREATE_PIPELINE_LAYOUT,
 		FAIL_CREATE_PIPELINE
 	};
@@ -41,8 +45,14 @@ struct GfxPipelineImpl {
 	bool is_initialized() { return is_init; }
 	bool is_swapchain_dependent() { return should_init_with_swapchain; };
 
+	vk::DescriptorSetLayout descriptor_set_layout;
 	vk::PipelineLayout pipeline_layout;
 	vk::Pipeline pipeline;
+
+	vk::PushConstantRange mesh_id_push_constant{ vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32_t) };
+
+	std::vector<StringHash> buffer_type_names;
+	std::unordered_map<StringHash, vk::DescriptorSetLayoutBinding> buffer_layout_bindings;
 
 protected:
 
@@ -63,16 +73,24 @@ protected:
 };
 
 
-template <VertexType T>
+template <VertexType Vtx, BufferObjectType... Buf>
 struct GfxPipeline : public GfxPipelineImpl {
 
 	GfxPipeline() {
-		vertex_binding_description = T::binding_description();
-		vertex_attribute_descriptions.resize(T::attribute_description().size());
-		
-		for (size_t i = 0; i < vertex_attribute_descriptions.size(); i++) {
-			vertex_attribute_descriptions[i] = T::attribute_description()[i];
-		}
-	}
+		vertex_binding_description = Vtx::binding_description();
 
+		vertex_attribute_descriptions.resize(Vtx::attribute_description().size());
+		for (size_t i = 0; i < vertex_attribute_descriptions.size(); i++) {
+			vertex_attribute_descriptions[i] = Vtx::attribute_description()[i];
+		}
+
+		std::vector<StringHash> names = { (Buf::name())... };
+		std::vector<vk::DescriptorSetLayoutBinding> bindings = { (Buf::layout_binding())... };
+
+		for (size_t i = 0; i < names.size(); i++) {
+			buffer_layout_bindings[names[i]] = bindings[i];
+		}
+
+		buffer_type_names = names;
+	}
 };

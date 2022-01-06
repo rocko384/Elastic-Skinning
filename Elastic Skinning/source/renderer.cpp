@@ -1,12 +1,12 @@
-#include "renderer.h"
+#include "Renderer.h"
 
 #include <array>
 
-Renderer::~Renderer() {
+RendererImpl::~RendererImpl() {
 	deinit();
 }
 
-void Renderer::init(GfxContext* Context) {
+void RendererImpl::init(GfxContext* Context) {
 	if (Context == nullptr) {
 		LOG_ERROR("Graphics context doesn't exist");
 		return;
@@ -138,19 +138,65 @@ void Renderer::init(GfxContext* Context) {
 	}
 
 	/*
+	* Descriptor pool creation
+	*/
+
+	uint32_t numPerMeshUbos = 0;
+	uint32_t numGlobalUbos = 0;
+
+	for (auto& is_per_mesh : ubo_type_is_per_mesh) {
+		if (is_per_mesh.second) {
+			numPerMeshUbos++;
+		}
+		else {
+			numGlobalUbos++;
+		}
+	}
+
+	numPerMeshUbos *= render_swapchain.images.size();
+	numGlobalUbos *= render_swapchain.images.size();
+
+	std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
+		{ vk::DescriptorType::eStorageBuffer, numPerMeshUbos },
+		{ vk::DescriptorType::eUniformBuffer, numGlobalUbos }
+	};
+
+	uint32_t totalSets = numPerMeshUbos + numGlobalUbos;
+
+	vk::DescriptorPoolCreateInfo descriptorPoolInfo;
+	descriptorPoolInfo.poolSizeCount = descriptorPoolSizes.size();
+	descriptorPoolInfo.pPoolSizes = descriptorPoolSizes.data();
+	descriptorPoolInfo.maxSets = totalSets;
+
+	descriptor_pool = context->primary_logical_device.createDescriptorPool(descriptorPoolInfo);
+
+	if (!descriptor_pool) {
+		LOG_ERROR("Failed to create descriptor pool");
+		return;
+	}
+
+	/*
 	* Finish initialization
 	*/
 
 	is_init = true;
 }
 
-void Renderer::deinit() {
+void RendererImpl::deinit() {
 	if (is_initialized()) {
 		context->primary_logical_device.waitIdle();
 
+		context->primary_logical_device.destroy(descriptor_pool);
+
+		for (auto& bufferList : frame_data_buffers) {
+			for (auto& buffer : bufferList.second) {
+				context->destroy_buffer(buffer);
+			}
+		}
+
 		for (auto& mesh : meshes) {
-			vmaDestroyBuffer(context->allocator, mesh.vertex_buffer, mesh.vertex_allocation);
-			vmaDestroyBuffer(context->allocator, mesh.index_buffer, mesh.index_allocation);
+			context->destroy_buffer(mesh.vertex_buffer);
+			context->destroy_buffer(mesh.index_buffer);
 		}
 
 		for (auto semaphore : image_available_semaphores) {
@@ -177,11 +223,11 @@ void Renderer::deinit() {
 	is_init = false;
 }
 
-Renderer::Error Renderer::register_pipeline(const std::string& Name, GfxPipelineImpl&& Pipeline) {
+RendererImpl::Error RendererImpl::register_pipeline(const std::string& Name, GfxPipelineImpl&& Pipeline) {
 	return register_pipeline(std::hash<std::string>()(Name), std::move(Pipeline));
 }
 
-Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipelineImpl&& Pipeline) {
+RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipelineImpl&& Pipeline) {
 	if (pipelines.contains(Name)) {
 		return Error::PIPELINE_WITH_NAME_ALREADY_EXISTS;
 	}
@@ -216,6 +262,10 @@ Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipelineImpl&& P
 		LOG_ERROR("Pipeline was given no shaders");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
+	case GfxPipelineImpl::Error::FAIL_CREATE_DESCRIPTOR_SET_LAYOUT:
+		LOG_ERROR("Failed to create descriptor set layout");
+		return Error::PIPELINE_INIT_ERROR;
+		break;
 	case GfxPipelineImpl::Error::FAIL_CREATE_PIPELINE_LAYOUT:
 		LOG_ERROR("Failed to create pipeline layout");
 		return Error::PIPELINE_INIT_ERROR;
@@ -228,10 +278,21 @@ Renderer::Error Renderer::register_pipeline(StringHash Name, GfxPipelineImpl&& P
 		break;
 	}
 
+	// Allocate descriptor sets
+	std::vector<vk::DescriptorSetLayout> layouts(render_swapchain.images.size(), pipelines[Name].descriptor_set_layout);
+
+	vk::DescriptorSetAllocateInfo descriptorSetInfo;
+	descriptorSetInfo.descriptorPool = descriptor_pool;
+	descriptorSetInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+	descriptorSetInfo.pSetLayouts = layouts.data();
+
+	descriptor_sets[Name] = context->primary_logical_device.allocateDescriptorSets(descriptorSetInfo);
+
+
 	return Error::OK;
 }
 
-Retval<Renderer::MeshId, Renderer::Error> Renderer::digest_mesh(Mesh Mesh) {
+Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
 	InternalMesh digestedMesh;
 	digestedMesh.pipeline_hash = std::hash<std::string>()(Mesh.pipeline_name);
 	digestedMesh.vertex_count = Mesh.vertices.size();
@@ -242,49 +303,14 @@ Retval<Renderer::MeshId, Renderer::Error> Renderer::digest_mesh(Mesh Mesh) {
 	*/
 	size_t vertexMemorySize = sizeof(Mesh::VertexType) * Mesh.vertices.size();
 
-	vk::BufferCreateInfo vtxBufferInfo{};
-	vtxBufferInfo.size = vertexMemorySize;
-	vtxBufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst;
-	vtxBufferInfo.sharingMode = vk::SharingMode::eExclusive;
-	VkBufferCreateInfo vtxBufferInfoConv = vtxBufferInfo;
-
-	VmaAllocationCreateInfo allocateInfo{};
-	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
-	
-	VkBuffer vtxBuffer;
-	VmaAllocation vtxAllocation;
-
-	VkResult result = vmaCreateBuffer(context->allocator, &vtxBufferInfoConv, &allocateInfo, &vtxBuffer, &vtxAllocation, nullptr);
-
-	if (result != VK_SUCCESS) {
-		return { 0, Error::FAILED_TO_ALLOCATE_BUFFER };
-	}
-
-	digestedMesh.vertex_buffer = vtxBuffer;
-	digestedMesh.vertex_allocation = vtxAllocation;
+	digestedMesh.vertex_buffer = context->create_vertex_buffer(vertexMemorySize);
 
 	/*
 	* Create and allocate GPU buffer for indices
 	*/
 	size_t indexMemorySize = sizeof(Mesh::IndexType) * Mesh.indices.size();
 
-	vk::BufferCreateInfo idxBufferInfo{};
-	idxBufferInfo.size = indexMemorySize;
-	idxBufferInfo.usage = vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst;
-	idxBufferInfo.sharingMode = vk::SharingMode::eExclusive;
-	VkBufferCreateInfo idxBufferInfoConv = idxBufferInfo;
-
-	VkBuffer idxBuffer;
-	VmaAllocation idxAllocation;
-
-	result = vmaCreateBuffer(context->allocator, &idxBufferInfoConv, &allocateInfo, &idxBuffer, &idxAllocation, nullptr);
-
-	if (result != VK_SUCCESS) {
-		return { 0, Error::FAILED_TO_ALLOCATE_BUFFER };
-	}
-
-	digestedMesh.index_buffer = idxBuffer;
-	digestedMesh.index_allocation = idxAllocation;
+	digestedMesh.index_buffer = context->create_index_buffer(indexMemorySize);
 
 	/*
 	* Upload data to GPU
@@ -300,23 +326,23 @@ Retval<Renderer::MeshId, Renderer::Error> Renderer::digest_mesh(Mesh Mesh) {
 	commandBufferInfo.level = vk::CommandBufferLevel::eSecondary;
 	commandBufferInfo.commandBufferCount = 1;
 
-	digestedMesh.render_command_buffer = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo)[0];
-
-	if (!digestedMesh.render_command_buffer) {
-		return { 0, Error::FAILED_TO_ALLOCATE_COMMAND_BUFFERS };
-	}
-
+	mesh_transforms.push_back(Transform);
 	meshes.push_back(digestedMesh);
 
-	return { meshes.size() - 1, Error::OK };
+	return { static_cast<MeshId>(meshes.size() - 1), Error::OK };
 }
 
-void Renderer::draw_frame() {
+void RendererImpl::set_camera(Camera* Camera) {
+	current_camera = Camera;
+}
+
+void RendererImpl::draw_frame() {
 	if (!should_render()) {
 		return;
 	}
 
 	if (is_first_render) {
+		finish_mesh_digestion();
 		record_command_buffers();
 		is_first_render = false;
 	}
@@ -340,6 +366,8 @@ void Renderer::draw_frame() {
 		std::array<vk::Fence, 1> ImageInFlightFences = { images_in_flight[imageIndex] };
 		context->primary_logical_device.waitForFences(ImageInFlightFences, VK_TRUE, UINT64_MAX);
 	}
+
+	update_frame_data(imageIndex);
 
 	vk::Semaphore waitSemaphores[] = { image_available_semaphores[current_frame]};
 	vk::Semaphore signalSemaphores[] = { render_finished_semaphores[current_frame] };
@@ -378,53 +406,137 @@ void Renderer::draw_frame() {
 	current_frame = (current_frame + 1) % max_frames_in_flight;
 }
 
-bool Renderer::should_render() {
+bool RendererImpl::should_render() {
 	return !context->window->is_minimized()
 		|| !render_swapchain.is_initialized()
 		|| !are_command_buffers_recorded;
 }
 
-void Renderer::record_command_buffers() {
-	context->primary_logical_device.waitIdle();
+void RendererImpl::update_frame_data(uint32_t ImageIdx) {
+	std::vector<VmaAllocation> updated_allocations;
+	std::vector<VkDeviceSize> updated_allocation_offsets;
+	std::vector<VkDeviceSize> updated_allocation_sizes;
 
-	std::vector<vk::CommandBuffer> secondary_command_buffers;
+	for (auto& name : ubo_type_names) {
+		VmaAllocation activeAllocation = frame_data_buffers[name][ImageIdx].allocation;
 
-	for (auto& mesh : meshes) {
-		vk::CommandBufferInheritanceInfo inheritanceInfo;
-		inheritanceInfo.renderPass = render_swapchain.render_pass;
-		inheritanceInfo.subpass = 0;
-		inheritanceInfo.framebuffer = nullptr;
-		inheritanceInfo.occlusionQueryEnable = VK_FALSE;
-		inheritanceInfo.queryFlags = vk::QueryControlFlagBits(0);
-		inheritanceInfo.pipelineStatistics = vk::QueryPipelineStatisticFlagBits(0);
+		if (name == ModelBuffer::name()) {
+			std::vector<glm::mat4> modelmats;
+			modelmats.resize(mesh_transforms.size());
 
-		vk::CommandBufferBeginInfo beginInfo;
-		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse | vk::CommandBufferUsageFlagBits::eRenderPassContinue;
-		beginInfo.pInheritanceInfo = &inheritanceInfo;
+			for (size_t i = 0; i < modelmats.size(); i++) {
+				modelmats[i] = glm::mat4(1.0f);
 
-		mesh.render_command_buffer.begin(beginInfo);
+				if (mesh_transforms[i] != nullptr) {
+					glm::mat4 scale = glm::scale(glm::mat4(1.0f), mesh_transforms[i]->scale);
+					glm::mat4 rotation = glm::mat4_cast(mesh_transforms[i]->rotation);
+					glm::mat4 position = glm::translate(glm::mat4(1.0f), mesh_transforms[i]->position);
+					modelmats[i] = position * rotation * scale;
+				}
+			}
 
-		mesh.render_command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines[mesh.pipeline_hash].pipeline);
+			size_t transferSize = modelmats.size() * sizeof(glm::mat4);
 
-		std::array < vk::Buffer, 1> vertexBuffers = { mesh.vertex_buffer };
-		std::array<vk::DeviceSize, 1> offsets = { 0 };
-		mesh.render_command_buffer.bindVertexBuffers(0, vertexBuffers, offsets);
-		mesh.render_command_buffer.bindIndexBuffer(mesh.index_buffer, 0, vk::IndexType::eUint32);
+			void* data;
+			vmaMapMemory(context->allocator, activeAllocation, &data);
+			std::memcpy(data, modelmats.data(), transferSize);
+			vmaUnmapMemory(context->allocator, activeAllocation);
+		
+			updated_allocations.push_back(activeAllocation);
+			updated_allocation_offsets.push_back(0);
+			updated_allocation_sizes.push_back(transferSize);
+		}
 
-		mesh.render_command_buffer.drawIndexed(static_cast<uint32_t>(mesh.index_count), 1, 0, 0, 0);
+		if (name == CameraBuffer::name()) {
+			CameraBuffer camera{ glm::mat4(1.0f), glm::mat4(1.0f) };
 
-		mesh.render_command_buffer.end();
+			if (current_camera != nullptr) {
+				camera.projection = current_camera->projection;
+				camera.view = current_camera->view, glm::vec3{ 1.0f, 1.0f, 1.0f };
+			}
 
-		secondary_command_buffers.push_back(mesh.render_command_buffer);
+			size_t transferSize = sizeof(CameraBuffer);
+
+			void* data;
+			vmaMapMemory(context->allocator, activeAllocation, &data);
+			std::memcpy(data, &camera, transferSize);
+			vmaUnmapMemory(context->allocator, activeAllocation);
+		
+			updated_allocations.push_back(activeAllocation);
+			updated_allocation_offsets.push_back(0);
+			updated_allocation_sizes.push_back(transferSize);
+		}
 	}
 
+	vmaFlushAllocations(context->allocator, updated_allocations.size(), updated_allocations.data(), updated_allocation_offsets.data(), updated_allocation_sizes.data());
+}
+
+void RendererImpl::finish_mesh_digestion() {
+	// Allocate buffer objects
+	for (auto& name : ubo_type_names) {
+		// Only allocate SSBOs that are per mesh
+		if (ubo_type_is_per_mesh[name]) {
+			frame_data_buffers[name].resize(render_swapchain.framebuffers.size());
+
+			for (auto& ssbo : frame_data_buffers[name]) {
+				ssbo = context->create_storage_buffer(ubo_type_sizes[name] * meshes.size());
+			}
+		}
+		// Allocate UBOs that aren't per mesh
+		else {
+			frame_data_buffers[name].resize(render_swapchain.framebuffers.size());
+
+			for (auto& ubo : frame_data_buffers[name]) {
+				ubo = context->create_uniform_buffer(ubo_type_sizes[name]);
+			}
+		}
+	}
+
+	// Populate descriptor sets
+	// Per pipeline
+	for (auto& pipeline : pipelines) {
+		// Per buffer type used by pipeline
+		for (auto& bufferName : pipeline.second.buffer_type_names) {
+			std::vector<vk::WriteDescriptorSet> descriptorWrites;
+
+			// Per frame state
+			for (size_t i = 0; i < render_swapchain.images.size(); i++) {
+				vk::DescriptorBufferInfo bufferInfo;
+				// frame_data_buffers[Buffer Type][Swapchain Image #]
+				bufferInfo.buffer = frame_data_buffers[bufferName][i].buffer;
+				bufferInfo.offset = 0;
+				bufferInfo.range = VK_WHOLE_SIZE;
+
+				vk::WriteDescriptorSet descriptorWrite;
+				// descriptor_sets[Pipeline Name][Swapchain Image #]
+				descriptorWrite.dstSet = descriptor_sets[pipeline.first][i];
+				descriptorWrite.dstBinding = pipeline.second.buffer_layout_bindings[bufferName].binding;
+				descriptorWrite.dstArrayElement = 0;
+				descriptorWrite.descriptorType = pipeline.second.buffer_layout_bindings[bufferName].descriptorType;
+				descriptorWrite.descriptorCount = pipeline.second.buffer_layout_bindings[bufferName].descriptorCount;
+				descriptorWrite.pBufferInfo = &bufferInfo;
+				descriptorWrite.pImageInfo = nullptr;
+				descriptorWrite.pTexelBufferView = nullptr;
+
+				descriptorWrites.push_back(descriptorWrite);
+			}
+
+			context->primary_logical_device.updateDescriptorSets(descriptorWrites, nullptr);
+		}
+	}
+}
+
+void RendererImpl::record_command_buffers() {
+	context->primary_logical_device.waitIdle();
+
 	for (size_t i = 0; i < primary_render_command_buffers.size(); i++) {
+		vk::CommandBuffer currentCommandBuffer = primary_render_command_buffers[i];
 
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
 		beginInfo.pInheritanceInfo = nullptr;
 
-		primary_render_command_buffers[i].begin(beginInfo);
+		currentCommandBuffer.begin(beginInfo);
 
 		vk::RenderPassBeginInfo renderPassInfo;
 		renderPassInfo.renderPass = render_swapchain.render_pass;
@@ -438,24 +550,59 @@ void Renderer::record_command_buffers() {
 		renderPassInfo.clearValueCount = 1;
 		renderPassInfo.pClearValues = &clearColor;
 
-		primary_render_command_buffers[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
+		currentCommandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
-		primary_render_command_buffers[i].executeCommands(secondary_command_buffers);
+		for (MeshId meshId = 0; meshId < meshes.size(); meshId++) {
+			GfxPipelineImpl* pipeline = &pipelines[meshes[meshId].pipeline_hash];
 
-		primary_render_command_buffers[i].endRenderPass();
+			currentCommandBuffer.bindPipeline(
+				vk::PipelineBindPoint::eGraphics,
+				pipeline->pipeline
+			);
 
-		primary_render_command_buffers[i].end();
+			currentCommandBuffer.bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
+				pipeline->pipeline_layout,
+				0,
+				descriptor_sets[meshes[meshId].pipeline_hash][i],
+				nullptr
+			);
+
+			currentCommandBuffer.pushConstants<MeshId>(
+				pipeline->pipeline_layout,
+				pipeline->mesh_id_push_constant.stageFlags,
+				pipeline->mesh_id_push_constant.offset,
+				meshId
+				);
+
+			std::array<vk::Buffer, 1> vertexBuffers = { meshes[meshId].vertex_buffer.buffer };
+			std::array<vk::DeviceSize, 1> offsets = { 0 };
+			currentCommandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
+			currentCommandBuffer.bindIndexBuffer(
+				meshes[meshId].index_buffer.buffer,
+				0,
+				vk::IndexType::eUint32
+			);
+
+			currentCommandBuffer.drawIndexed(
+				static_cast<uint32_t>(meshes[meshId].index_count),
+				1,
+				0,
+				0,
+				0
+			);
+		}
+
+		currentCommandBuffer.endRenderPass();
+
+		currentCommandBuffer.end();
 	}
 
 	are_command_buffers_recorded = true;
 }
 
-void Renderer::reset_command_buffers() {
+void RendererImpl::reset_command_buffers() {
 	context->primary_logical_device.waitIdle();
-
-	for (auto& mesh : meshes) {
-		mesh.render_command_buffer.reset();
-	}
 
 	for (auto& commandBuffer : primary_render_command_buffers) {
 		commandBuffer.reset();
@@ -465,18 +612,18 @@ void Renderer::reset_command_buffers() {
 }
 
 
-void Renderer::window_resized_callback(size_t w, size_t h) {
+void RendererImpl::window_resized_callback(size_t w, size_t h) {
 	window_restored_callback();
 }
 
-void Renderer::window_minimized_callback() {
+void RendererImpl::window_minimized_callback() {
 }
 
-void Renderer::window_maximized_callback() {
+void RendererImpl::window_maximized_callback() {
 	window_restored_callback();
 }
 
-void Renderer::window_restored_callback() {
+void RendererImpl::window_restored_callback() {
 	context->primary_logical_device.waitIdle();
 
 	render_swapchain.reinit();

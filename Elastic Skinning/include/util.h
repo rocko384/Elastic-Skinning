@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <type_traits>
+#include <utility>
 #include <cstdio>
 
 template <typename VALUE_TYPE, typename STATUS_TYPE>
@@ -18,6 +19,18 @@ concept ArrayType =
 		{a.size()} -> std::integral;
 		{a[0]} -> std::same_as<typename T::reference>;
 	};
+
+template <typename T>
+concept BooleanTestableImpl =
+std::convertible_to<T, bool>;
+
+template <typename T>
+concept BooleanTestable =
+	BooleanTestableImpl<T> &&
+	requires (T && b) {
+		{!std::forward<T>(b)} ->  BooleanTestableImpl;
+	};
+	
 
 #define LOG(format, ...) \
 	fprintf(stdout, "\33[38;5;75m"); \

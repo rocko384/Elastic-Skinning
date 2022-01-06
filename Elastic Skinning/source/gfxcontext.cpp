@@ -429,7 +429,101 @@ void GfxContext::deinit() {
 	is_init = false;
 }
 
-void GfxContext::transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::DeviceSize Size) {
+BufferAllocation GfxContext::create_vertex_buffer(vk::DeviceSize Size) {
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = Size;
+	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
+
+	VkBuffer buffer;
+	VmaAllocation allocation;
+
+	vmaCreateBuffer(allocator, &bufferInfo, &allocateInfo, &buffer, &allocation, nullptr);
+
+	return { buffer, allocation };
+}
+
+BufferAllocation GfxContext::create_index_buffer(vk::DeviceSize Size) {
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = Size;
+	bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
+
+	VkBuffer buffer;
+	VmaAllocation allocation;
+
+	vmaCreateBuffer(allocator, &bufferInfo, &allocateInfo, &buffer, &allocation, nullptr);
+
+	return { buffer, allocation };
+}
+
+BufferAllocation GfxContext::create_transfer_buffer(vk::DeviceSize Size) {
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = Size;
+	bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY;
+
+	VkBuffer buffer;
+	VmaAllocation allocation;
+
+	vmaCreateBuffer(allocator, &bufferInfo, &allocateInfo, &buffer, &allocation, nullptr);
+
+	return { buffer, allocation };
+}
+
+BufferAllocation GfxContext::create_uniform_buffer(vk::DeviceSize Size) {
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = Size;
+	bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+	VkBuffer buffer;
+	VmaAllocation allocation;
+
+	vmaCreateBuffer(allocator, &bufferInfo, &allocateInfo, &buffer, &allocation, nullptr);
+
+	return { buffer, allocation };
+}
+
+BufferAllocation GfxContext::create_storage_buffer(vk::DeviceSize Size) {
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = Size;
+	bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VmaAllocationCreateInfo allocateInfo{};
+	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+	VkBuffer buffer;
+	VmaAllocation allocation;
+
+	vmaCreateBuffer(allocator, &bufferInfo, &allocateInfo, &buffer, &allocation, nullptr);
+
+	return { buffer, allocation };
+}
+
+void GfxContext::destroy_buffer(BufferAllocation Buffer) {
+	vmaDestroyBuffer(allocator, Buffer.buffer, Buffer.allocation);
+}
+
+void GfxContext::transfer_buffer_memory(BufferAllocation Dest, BufferAllocation Source, vk::DeviceSize Size) {
 	vk::CommandBufferAllocateInfo commandAllocInfo;
 	commandAllocInfo.level = vk::CommandBufferLevel::ePrimary;
 	commandAllocInfo.commandPool = memory_transfer_command_pool;
@@ -447,7 +541,7 @@ void GfxContext::transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::
 	copyRegion.dstOffset = 0;
 	copyRegion.size = Size;
 
-	transferCommandBuffer.copyBuffer(Source, Dest, copyRegion);
+	transferCommandBuffer.copyBuffer(Source.buffer, Dest.buffer, copyRegion);
 
 	transferCommandBuffer.end();
 
@@ -461,36 +555,19 @@ void GfxContext::transfer_buffer_memory(vk::Buffer Dest, vk::Buffer Source, vk::
 	primary_logical_device.freeCommandBuffers(memory_transfer_command_pool, transferCommandBuffer);
 }
 
-void GfxContext::upload_to_gpu_buffer(vk::Buffer Dest, void* Source, size_t Size) {
-	vk::BufferCreateInfo bufferInfo{};
-	bufferInfo.size = Size;
-	bufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
-	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-	VkBufferCreateInfo bufferInfoConv = bufferInfo;
-
-	VmaAllocationCreateInfo allocateInfo{};
-	allocateInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY;
-
-	VkBuffer cpuBuffer;
-	VmaAllocation allocation;
-
-	VkResult result = vmaCreateBuffer(allocator, &bufferInfoConv, &allocateInfo, &cpuBuffer, &allocation, nullptr);
-
-	if (result != VK_SUCCESS) {
-		LOG_ERROR("Failed to allocate buffer");
-		return;
-	}
+void GfxContext::upload_to_gpu_buffer(BufferAllocation Dest, void* Source, size_t Size) {
+	BufferAllocation transferBuffer = create_transfer_buffer(Size);
 
 	void* data;
-	vmaMapMemory(allocator, allocation, &data);
+	vmaMapMemory(allocator, transferBuffer.allocation, &data);
 	std::memcpy(data, Source, Size);
-	vmaUnmapMemory(allocator, allocation);
+	vmaUnmapMemory(allocator, transferBuffer.allocation);
 
-	vmaFlushAllocation(allocator, allocation, 0, Size);
+	vmaFlushAllocation(allocator, transferBuffer.allocation, 0, Size);
 
-	transfer_buffer_memory(Dest, cpuBuffer, Size);
+	transfer_buffer_memory(Dest, transferBuffer, Size);
 
-	vmaDestroyBuffer(allocator, cpuBuffer, allocation);
+	destroy_buffer(transferBuffer);
 }
 
 vk::ShaderModule GfxContext::create_shader_module(std::filesystem::path path) {

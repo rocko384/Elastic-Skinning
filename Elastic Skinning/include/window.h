@@ -13,6 +13,11 @@ class Window {
 
 public:
 
+	struct Dimensions {
+		size_t width;
+		size_t height;
+	};
+
 	using ResizedCallback = std::function<void(size_t w, size_t h)>;
 	using MinimizedCallback = std::function<void()>;
 	using MaximizedCallback = std::function<void()>;
@@ -27,6 +32,9 @@ public:
 	bool is_initialized() { return is_init; }
 	bool should_close() { return saw_close_event; }
 	bool is_minimized() { return is_minimized_; };
+
+	Dimensions get_dimensions();
+	float get_aspect_ratio();
 
 	void poll_events();
 

@@ -23,7 +23,7 @@ set(SOURCE
 	"include/mesh.h"
 	"source/mesh.cpp"
 	"source/vma_impl.cpp"
-)
+ "include/renderingtypes.h" )
 
 file(GLOB
 	SHADERS
