@@ -2,52 +2,8 @@
 
 #include <vector>
 
-GfxPipelineImpl::GfxPipelineImpl(GfxPipelineImpl&& rhs) noexcept {
-	this->operator=(std::move(rhs));
-}
-
 GfxPipelineImpl::~GfxPipelineImpl() {
 	deinit();
-}
-
-GfxPipelineImpl& GfxPipelineImpl::operator=(GfxPipelineImpl&& rhs) noexcept {
-	this->descriptor_set_layout = rhs.descriptor_set_layout;
-	this->pipeline_layout = rhs.pipeline_layout;
-	this->pipeline = rhs.pipeline;
-	this->buffer_type_names = rhs.buffer_type_names;
-	this->buffer_layout_bindings = rhs.buffer_layout_bindings;
-
-	this->is_init = rhs.is_init;
-	this->should_init_with_swapchain = rhs.should_init_with_swapchain;
-	this->context = rhs.context;
-	this->swapchain = rhs.swapchain;
-	this->vertex_binding_description = rhs.vertex_binding_description;
-	this->vertex_attribute_descriptions = rhs.vertex_attribute_descriptions;
-	this->vertex_shader_path = rhs.vertex_shader_path;
-	this->tessellation_control_shader_path = rhs.tessellation_control_shader_path;
-	this->tessellation_eval_shader_path = rhs.tessellation_eval_shader_path;
-	this->geometry_shader_path = rhs.geometry_shader_path;
-	this->fragment_shader_path = rhs.fragment_shader_path;
-
-	rhs.descriptor_set_layout = nullptr;
-	rhs.pipeline_layout = nullptr;
-	rhs.pipeline = nullptr;
-	rhs.buffer_type_names.clear();
-	rhs.buffer_layout_bindings.clear();
-
-	rhs.is_init = false;
-	rhs.should_init_with_swapchain = true;
-	rhs.context = nullptr;
-	rhs.swapchain = nullptr;
-	rhs.vertex_binding_description = vk::VertexInputBindingDescription{};
-	rhs.vertex_attribute_descriptions.clear();
-	rhs.vertex_shader_path.clear();
-	rhs.tessellation_control_shader_path.clear();
-	rhs.tessellation_eval_shader_path.clear();
-	rhs.geometry_shader_path.clear();
-	rhs.fragment_shader_path.clear();
-
-	return *this;
 }
 
 GfxPipelineImpl& GfxPipelineImpl::set_vertex_shader(std::filesystem::path path) {

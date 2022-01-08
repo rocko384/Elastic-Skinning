@@ -47,8 +47,6 @@ void RendererImpl::init(GfxContext* Context) {
 	* Create the swapchain
 	*/
 
-	/// TODO: Break this out in some way to facilitate dynamic swapchain recreation for window resizing
-
 	auto swapchainError = render_swapchain.init(context);
 
 	if (swapchainError != Swapchain::Error::OK) {
@@ -191,11 +189,11 @@ void RendererImpl::deinit() {
 	is_init = false;
 }
 
-RendererImpl::Error RendererImpl::register_pipeline(const std::string& Name, GfxPipelineImpl&& Pipeline) {
-	return register_pipeline(std::hash<std::string>()(Name), std::move(Pipeline));
+RendererImpl::Error RendererImpl::register_pipeline(const std::string& Name, GfxPipelineImpl& Pipeline) {
+	return register_pipeline(std::hash<std::string>()(Name), Pipeline);
 }
 
-RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipelineImpl&& Pipeline) {
+RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipelineImpl& Pipeline) {
 	if (pipelines.contains(Name)) {
 		return Error::PIPELINE_WITH_NAME_ALREADY_EXISTS;
 	}
@@ -305,14 +303,14 @@ void RendererImpl::set_camera(Camera* Camera) {
 }
 
 void RendererImpl::draw_frame() {
-	if (!should_render()) {
-		return;
-	}
-
 	if (is_first_render) {
 		finish_mesh_digestion();
 		record_command_buffers();
 		is_first_render = false;
+	}
+
+	if (!should_render()) {
+		return;
 	}
 
 	auto frame = render_swapchain.prepare_frame();
@@ -340,9 +338,7 @@ void RendererImpl::draw_frame() {
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = signalSemaphores;
 
-
 	context->primary_queue.submit({ submitInfo }, frame.value.fence);
-
 
 	if (render_swapchain.present_frame(frame.value) != Swapchain::Error::OK) {
 		LOG_ERROR("Swapchain presentation failure");
@@ -351,8 +347,8 @@ void RendererImpl::draw_frame() {
 
 bool RendererImpl::should_render() {
 	return !context->window->is_minimized()
-		|| !render_swapchain.is_initialized()
-		|| !are_command_buffers_recorded;
+		&& render_swapchain.is_initialized()
+		&& are_command_buffers_recorded;
 }
 
 void RendererImpl::update_frame_data(Swapchain::FrameId ImageIdx) {
@@ -546,12 +542,11 @@ void RendererImpl::record_command_buffers() {
 
 void RendererImpl::reset_command_buffers() {
 	context->primary_logical_device.waitIdle();
+	are_command_buffers_recorded = false;
 
 	for (auto& commandBuffer : primary_render_command_buffers) {
 		commandBuffer.reset();
 	}
-
-	are_command_buffers_recorded = false;
 }
 
 

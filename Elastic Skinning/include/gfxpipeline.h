@@ -26,10 +26,10 @@ struct GfxPipelineImpl {
 	};
 
 	GfxPipelineImpl() = default;
-	GfxPipelineImpl(GfxPipelineImpl&& rhs) noexcept;
+	GfxPipelineImpl(GfxPipelineImpl&& rhs) noexcept = default;
 	~GfxPipelineImpl();
 
-	GfxPipelineImpl& operator=(GfxPipelineImpl&& rhs) noexcept;
+	GfxPipelineImpl& operator=(GfxPipelineImpl&& rhs) noexcept = default;
 
 	GfxPipelineImpl& set_vertex_shader(std::filesystem::path path);
 	GfxPipelineImpl& set_tessellation_control_shader(std::filesystem::path path);

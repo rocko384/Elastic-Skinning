@@ -36,8 +36,8 @@ public:
 
 	bool is_initialized() { return is_init; }
 
-	Error register_pipeline(const std::string& Name, GfxPipelineImpl&& Pipeline);
-	Error register_pipeline(StringHash Name, GfxPipelineImpl&& Pipeline);
+	Error register_pipeline(const std::string& Name, GfxPipelineImpl& Pipeline);
+	Error register_pipeline(StringHash Name, GfxPipelineImpl& Pipeline);
 
 	Retval<MeshId, Error> digest_mesh(Mesh Mesh, ModelTransform* Transform);
 
@@ -81,13 +81,13 @@ protected:
 	std::unordered_map<StringHash, std::vector<BufferAllocation>> frame_data_buffers;
 
 	struct InternalMesh {
+		BufferAllocation vertex_buffer;
+		BufferAllocation index_buffer;
+
 		StringHash pipeline_hash{ 0 };
 
 		size_t vertex_count{ 0 };
-		BufferAllocation vertex_buffer;
-
 		size_t index_count{ 0 };
-		BufferAllocation index_buffer;
 	};
 
 	std::vector<InternalMesh> meshes;

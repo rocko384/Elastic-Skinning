@@ -257,6 +257,7 @@ Swapchain::Error Swapchain::init(GfxContext* Context) {
 	* Finish initialization
 	*/
 	
+	current_frame = 0;
 	is_init = true;
 
 	return Error::OK;
@@ -269,18 +270,29 @@ Swapchain::Error Swapchain::reinit() {
 
 void Swapchain::deinit() {
 	if (is_initialized()) {
+		is_init = false;
+		
+		context->primary_logical_device.waitIdle();
+
+		images_in_flight.clear();
+
+		for (auto fence : in_flight_fences) {
+			context->primary_logical_device.destroy(fence);
+		}
+
+		in_flight_fences.clear();
 
 		for (auto semaphore : image_available_semaphores) {
 			context->primary_logical_device.destroy(semaphore);
 		}
 
+		image_available_semaphores.clear();
+
 		for (auto semaphore : render_finished_semaphores) {
 			context->primary_logical_device.destroy(semaphore);
 		}
 
-		for (auto fence : in_flight_fences) {
-			context->primary_logical_device.destroy(fence);
-		}
+		render_finished_semaphores.clear();
 
 		if (!framebuffers.empty()) {
 			for (auto framebuffer : framebuffers) {
@@ -298,14 +310,14 @@ void Swapchain::deinit() {
 			for (auto imageView : image_views) {
 				context->primary_logical_device.destroy(imageView);
 			}
+
+			image_views.clear();
 		}
 
 		if (swapchain) {
 			context->primary_logical_device.destroy(swapchain);
 		}
 	}
-
-	is_init = false;
 }
 
 Retval <Swapchain::Frame, Swapchain::Error> Swapchain::prepare_frame() {
@@ -322,17 +334,17 @@ Retval <Swapchain::Frame, Swapchain::Error> Swapchain::prepare_frame() {
 		return { {}, Error::OUT_OF_DATE };
 	}
 
-	if (images_in_flight[imageIndex.value]) {
-		std::array<vk::Fence, 1> ImageInFlightFences = { images_in_flight[imageIndex.value] };
+	if (images_in_flight[current_frame]) {
+		std::array<vk::Fence, 1> ImageInFlightFences = { images_in_flight[current_frame] };
 		context->primary_logical_device.waitForFences(ImageInFlightFences, VK_TRUE, UINT64_MAX);
-		images_in_flight[imageIndex.value] = nullptr;
+		images_in_flight[current_frame] = nullptr;
 	}
 
 	context->primary_logical_device.resetFences(currentFences);
 
 	return {
-		image_available_semaphores[imageIndex.value],
-		render_finished_semaphores[imageIndex.value],
+		image_available_semaphores[current_frame],
+		render_finished_semaphores[current_frame],
 		in_flight_fences[current_frame],
 		imageIndex.value
 	};
