@@ -10,6 +10,7 @@
 #include <cstdint>
 
 struct Swapchain {
+
 	enum class Error {
 		OK,
 		INVALID_CONTEXT,
@@ -17,8 +18,14 @@ struct Swapchain {
 		FAIL_CREATE_SWAPCHAIN,
 		FAIL_CREATE_IMAGE_VIEW,
 		FAIL_CREATE_RENDER_PASS,
-		FAIL_CREATE_FRAMEBUFFER
+		FAIL_CREATE_FRAMEBUFFER,
+		FAIL_CREATE_SYNCH_OBJECTS,
+		FAIL_ACQUIRE_IMAGE,
+		OUT_OF_DATE,
+		FAIL_PRESENT_SWAPCHAIN
 	};
+
+	using FrameId = uint32_t;
 
 	~Swapchain();
 
@@ -28,17 +35,37 @@ struct Swapchain {
 
 	bool is_initialized() { return is_init; }
 
+	struct Frame {
+		vk::Semaphore image_available_semaphore;
+		vk::Semaphore render_finished_semaphore;
+		vk::Fence fence;
+
+		FrameId id;
+	};
+
+	Retval<Frame, Error> prepare_frame();
+	Error present_frame(Frame Frame);
+
 	vk::SwapchainKHR swapchain;
 	vk::Format format;
 	vk::Extent2D extent;
-	std::vector<vk::Image> images;
-	std::vector<vk::ImageView> image_views;
 	vk::RenderPass render_pass;
 	std::vector<vk::Framebuffer> framebuffers;
+
+	size_t max_frames_in_flight{ 0 };
+	size_t current_frame{ 0 };
 
 private:
 
 	bool is_init{ false };
 
 	GfxContext* context{ nullptr };
+
+	std::vector<vk::Image> images;
+	std::vector<vk::ImageView> image_views;
+
+	std::vector<vk::Semaphore> image_available_semaphores;
+	std::vector<vk::Semaphore> render_finished_semaphores;
+	std::vector<vk::Fence> in_flight_fences;
+	std::vector<vk::Fence> images_in_flight;
 };

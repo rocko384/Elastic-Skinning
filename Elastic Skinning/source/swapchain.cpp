@@ -225,6 +225,34 @@ Swapchain::Error Swapchain::init(GfxContext* Context) {
 		framebuffers[i] = framebuffer;
 	}
 
+
+	max_frames_in_flight =  framebuffers.size();
+
+	/*
+	* Create synchronization primitives
+	*/
+
+	image_available_semaphores.resize(max_frames_in_flight);
+	render_finished_semaphores.resize(max_frames_in_flight);
+	in_flight_fences.resize(max_frames_in_flight);
+	images_in_flight.resize(framebuffers.size(), {});
+
+	vk::SemaphoreCreateInfo semaphoreInfo;
+	vk::FenceCreateInfo fenceInfo;
+	fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
+
+	for (size_t i = 0; i < max_frames_in_flight; i++) {
+		image_available_semaphores[i] = context->primary_logical_device.createSemaphore(semaphoreInfo);
+		render_finished_semaphores[i] = context->primary_logical_device.createSemaphore(semaphoreInfo);
+		in_flight_fences[i] = context->primary_logical_device.createFence(fenceInfo);
+
+		if (!image_available_semaphores[i]
+			|| !render_finished_semaphores[i]
+			|| !in_flight_fences[i]) {
+			return Error::FAIL_CREATE_SYNCH_OBJECTS;
+		}
+	}
+
 	/*
 	* Finish initialization
 	*/
@@ -241,6 +269,19 @@ Swapchain::Error Swapchain::reinit() {
 
 void Swapchain::deinit() {
 	if (is_initialized()) {
+
+		for (auto semaphore : image_available_semaphores) {
+			context->primary_logical_device.destroy(semaphore);
+		}
+
+		for (auto semaphore : render_finished_semaphores) {
+			context->primary_logical_device.destroy(semaphore);
+		}
+
+		for (auto fence : in_flight_fences) {
+			context->primary_logical_device.destroy(fence);
+		}
+
 		if (!framebuffers.empty()) {
 			for (auto framebuffer : framebuffers) {
 				context->primary_logical_device.destroy(framebuffer);
@@ -265,4 +306,58 @@ void Swapchain::deinit() {
 	}
 
 	is_init = false;
+}
+
+Retval <Swapchain::Frame, Swapchain::Error> Swapchain::prepare_frame() {
+	std::array<vk::Fence, 1> currentFences = { in_flight_fences[current_frame] };
+	context->primary_logical_device.waitForFences(currentFences, VK_TRUE, UINT64_MAX);
+
+	auto imageIndex = context->primary_logical_device.acquireNextImageKHR(swapchain, UINT64_MAX, image_available_semaphores[current_frame], nullptr);
+
+	if (imageIndex.result != vk::Result::eSuccess) {
+		return { {}, Error::FAIL_ACQUIRE_IMAGE };
+	}
+
+	if (imageIndex.result == vk::Result::eErrorOutOfDateKHR) {
+		return { {}, Error::OUT_OF_DATE };
+	}
+
+	if (images_in_flight[imageIndex.value]) {
+		std::array<vk::Fence, 1> ImageInFlightFences = { images_in_flight[imageIndex.value] };
+		context->primary_logical_device.waitForFences(ImageInFlightFences, VK_TRUE, UINT64_MAX);
+		images_in_flight[imageIndex.value] = nullptr;
+	}
+
+	context->primary_logical_device.resetFences(currentFences);
+
+	return {
+		image_available_semaphores[imageIndex.value],
+		render_finished_semaphores[imageIndex.value],
+		in_flight_fences[current_frame],
+		imageIndex.value
+	};
+}
+
+Swapchain::Error Swapchain::present_frame(Frame Frame) {
+	Error retval = Error::OK;
+
+	images_in_flight[Frame.id] = in_flight_fences[current_frame];
+
+	vk::PresentInfoKHR presentInfo;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = &Frame.render_finished_semaphore;
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = &swapchain;
+	presentInfo.pImageIndices = &Frame.id;
+	presentInfo.pResults = nullptr;
+
+	vk::Result presentStatus = context->present_queue.presentKHR(presentInfo);
+
+	if (presentStatus != vk::Result::eSuccess) {
+		retval = Error::FAIL_PRESENT_SWAPCHAIN;
+	}
+
+	current_frame = (current_frame + 1) % max_frames_in_flight;
+
+	return retval;
 }

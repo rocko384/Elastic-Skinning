@@ -49,7 +49,7 @@ protected:
 
 	bool should_render();
 
-	void update_frame_data(uint32_t ImageIdx);
+	void update_frame_data(Swapchain::FrameId ImageIdx);
 
 	void finish_mesh_digestion();
 
@@ -98,14 +98,6 @@ protected:
 	vk::CommandPool command_pool;
 	std::vector<vk::CommandBuffer> primary_render_command_buffers;
 	bool are_command_buffers_recorded{ false };
-
-	size_t max_frames_in_flight{ 0 };
-	size_t current_frame{ 0 };
-
-	std::vector<vk::Semaphore> image_available_semaphores;
-	std::vector<vk::Semaphore> render_finished_semaphores;
-	std::vector<vk::Fence> in_flight_fences;
-	std::vector<vk::Fence> images_in_flight;
 
 };
 

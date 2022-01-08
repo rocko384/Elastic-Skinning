@@ -73,12 +73,18 @@ void RendererImpl::init(GfxContext* Context) {
 			LOG_ERROR("Failed to create swapchain render pass");
 			return;
 			break;
+		case Swapchain::Error::FAIL_CREATE_FRAMEBUFFER:
+			LOG_ERROR("Failed to create swapchain framebuffer");
+			return;
+			break;
+		case Swapchain::Error::FAIL_CREATE_SYNCH_OBJECTS:
+			LOG_ERROR("Failed to create render synch primitives");
+			return;
+			break;
 		default:
 			break;
 		}
 	}
-
-	max_frames_in_flight = render_swapchain.framebuffers.size();
 
 	/*
 	* Create command pool
@@ -112,32 +118,6 @@ void RendererImpl::init(GfxContext* Context) {
 	}
 
 	/*
-	* Create synchronization primitives
-	*/
-
-	image_available_semaphores.resize(max_frames_in_flight);
-	render_finished_semaphores.resize(max_frames_in_flight);
-	in_flight_fences.resize(max_frames_in_flight);
-	images_in_flight.resize(render_swapchain.images.size(), {});
-
-	vk::SemaphoreCreateInfo semaphoreInfo;
-	vk::FenceCreateInfo fenceInfo;
-	fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
-	
-	for (size_t i = 0; i < max_frames_in_flight; i++) {
-		image_available_semaphores[i] = context->primary_logical_device.createSemaphore(semaphoreInfo);
-		render_finished_semaphores[i] = context->primary_logical_device.createSemaphore(semaphoreInfo);
-		in_flight_fences[i] = context->primary_logical_device.createFence(fenceInfo);
-
-		if (!image_available_semaphores[i] 
-			|| !render_finished_semaphores[i]
-			|| !in_flight_fences[i]) {
-			LOG_ERROR("Failed to create render synch primitives");
-			return;
-		}
-	}
-
-	/*
 	* Descriptor pool creation
 	*/
 
@@ -153,8 +133,8 @@ void RendererImpl::init(GfxContext* Context) {
 		}
 	}
 
-	numPerMeshUbos *= render_swapchain.images.size();
-	numGlobalUbos *= render_swapchain.images.size();
+	numPerMeshUbos *= render_swapchain.framebuffers.size();
+	numGlobalUbos *= render_swapchain.framebuffers.size();
 
 	std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
 		{ vk::DescriptorType::eStorageBuffer, numPerMeshUbos },
@@ -197,18 +177,6 @@ void RendererImpl::deinit() {
 		for (auto& mesh : meshes) {
 			context->destroy_buffer(mesh.vertex_buffer);
 			context->destroy_buffer(mesh.index_buffer);
-		}
-
-		for (auto semaphore : image_available_semaphores) {
-			context->primary_logical_device.destroy(semaphore);
-		}
-
-		for (auto semaphore : render_finished_semaphores) {
-			context->primary_logical_device.destroy(semaphore);
-		}
-
-		for (auto fence : in_flight_fences) {
-			context->primary_logical_device.destroy(fence);
 		}
 
 		context->primary_logical_device.destroy(command_pool);
@@ -279,7 +247,7 @@ RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipeline
 	}
 
 	// Allocate descriptor sets
-	std::vector<vk::DescriptorSetLayout> layouts(render_swapchain.images.size(), pipelines[Name].descriptor_set_layout);
+	std::vector<vk::DescriptorSetLayout> layouts(render_swapchain.framebuffers.size(), pipelines[Name].descriptor_set_layout);
 
 	vk::DescriptorSetAllocateInfo descriptorSetInfo;
 	descriptorSetInfo.descriptorPool = descriptor_pool;
@@ -347,30 +315,20 @@ void RendererImpl::draw_frame() {
 		is_first_render = false;
 	}
 
-	/// TODO: Consider moving frame sync and organization logic to SwapchainContext 
+	auto frame = render_swapchain.prepare_frame();
 
-	std::array<vk::Fence, 1> currentFences = { in_flight_fences[current_frame] };
-	context->primary_logical_device.waitForFences(currentFences, VK_TRUE, UINT64_MAX);
-
-	auto imageIndex = context->primary_logical_device.acquireNextImageKHR(render_swapchain.swapchain, UINT64_MAX, image_available_semaphores[current_frame], nullptr);
-	
-	if (imageIndex.result != vk::Result::eSuccess) {
+	if (frame.status == Swapchain::Error::FAIL_ACQUIRE_IMAGE) {
 		LOG_ERROR("Error acquiring swapchain image");
 	}
 
-	if (imageIndex.result == vk::Result::eErrorOutOfDateKHR) {
+	if (frame.status == Swapchain::Error::OUT_OF_DATE) {
 		LOG_ERROR("Swapchain is out of date");
 	}
 
-	if (images_in_flight[imageIndex.value]) {
-		std::array<vk::Fence, 1> ImageInFlightFences = { images_in_flight[imageIndex] };
-		context->primary_logical_device.waitForFences(ImageInFlightFences, VK_TRUE, UINT64_MAX);
-	}
+	update_frame_data(frame.value.id);
 
-	update_frame_data(imageIndex);
-
-	vk::Semaphore waitSemaphores[] = { image_available_semaphores[current_frame]};
-	vk::Semaphore signalSemaphores[] = { render_finished_semaphores[current_frame] };
+	vk::Semaphore waitSemaphores[] = { frame.value.image_available_semaphore };
+	vk::Semaphore signalSemaphores[] = { frame.value.render_finished_semaphore };
 	vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
 
 	vk::SubmitInfo submitInfo;
@@ -378,32 +336,17 @@ void RendererImpl::draw_frame() {
 	submitInfo.pWaitSemaphores = waitSemaphores;
 	submitInfo.pWaitDstStageMask = waitStages;
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &primary_render_command_buffers[imageIndex];
+	submitInfo.pCommandBuffers = &primary_render_command_buffers[frame.value.id];
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = signalSemaphores;
 
-	context->primary_logical_device.resetFences(currentFences);
 
-	context->primary_queue.submit({ submitInfo }, in_flight_fences[current_frame]);
+	context->primary_queue.submit({ submitInfo }, frame.value.fence);
 
 
-	vk::SwapchainKHR swapChains[] = { render_swapchain.swapchain };
-
-	vk::PresentInfoKHR presentInfo;
-	presentInfo.waitSemaphoreCount = 1;
-	presentInfo.pWaitSemaphores = signalSemaphores;
-	presentInfo.swapchainCount = 1;
-	presentInfo.pSwapchains = swapChains;
-	presentInfo.pImageIndices = &imageIndex.value;
-	presentInfo.pResults = nullptr;
-
-	vk::Result presentStatus = context->present_queue.presentKHR(presentInfo);
-
-	if (presentStatus != vk::Result::eSuccess) {
+	if (render_swapchain.present_frame(frame.value) != Swapchain::Error::OK) {
 		LOG_ERROR("Swapchain presentation failure");
 	}
-
-	current_frame = (current_frame + 1) % max_frames_in_flight;
 }
 
 bool RendererImpl::should_render() {
@@ -412,7 +355,7 @@ bool RendererImpl::should_render() {
 		|| !are_command_buffers_recorded;
 }
 
-void RendererImpl::update_frame_data(uint32_t ImageIdx) {
+void RendererImpl::update_frame_data(Swapchain::FrameId ImageIdx) {
 	std::vector<VmaAllocation> updated_allocations;
 	std::vector<VkDeviceSize> updated_allocation_offsets;
 	std::vector<VkDeviceSize> updated_allocation_sizes;
@@ -500,7 +443,7 @@ void RendererImpl::finish_mesh_digestion() {
 			std::vector<vk::WriteDescriptorSet> descriptorWrites;
 
 			// Per frame state
-			for (size_t i = 0; i < render_swapchain.images.size(); i++) {
+			for (size_t i = 0; i < render_swapchain.framebuffers.size(); i++) {
 				vk::DescriptorBufferInfo bufferInfo;
 				// frame_data_buffers[Buffer Type][Swapchain Image #]
 				bufferInfo.buffer = frame_data_buffers[bufferName][i].buffer;
