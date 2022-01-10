@@ -1,6 +1,8 @@
 #include "Renderer.h"
 
 #include <array>
+#include <list>
+#include <memory>
 
 RendererImpl::~RendererImpl() {
 	deinit();
@@ -116,42 +118,29 @@ void RendererImpl::init(GfxContext* Context) {
 	}
 
 	/*
-	* Descriptor pool creation
+	* Texture sampler creation
 	*/
 
-	uint32_t numPerMeshUbos = 0;
-	uint32_t numGlobalUbos = 0;
+	vk::PhysicalDeviceProperties deviceProperties = context->get_physical_device_properties();
 
-	for (auto& is_per_mesh : ubo_type_is_per_mesh) {
-		if (is_per_mesh.second) {
-			numPerMeshUbos++;
-		}
-		else {
-			numGlobalUbos++;
-		}
-	}
+	vk::SamplerCreateInfo samplerInfo;
+	samplerInfo.magFilter = vk::Filter::eLinear;
+	samplerInfo.minFilter = vk::Filter::eLinear;
+	samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.anisotropyEnable = VK_TRUE;
+	samplerInfo.maxAnisotropy = deviceProperties.limits.maxSamplerAnisotropy;
+	samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+	samplerInfo.unnormalizedCoordinates = VK_FALSE;
+	samplerInfo.compareEnable = VK_FALSE;
+	samplerInfo.compareOp = vk::CompareOp::eAlways;
+	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+	samplerInfo.mipLodBias = 0.0f;
+	samplerInfo.minLod = 0.0f;
+	samplerInfo.maxLod = 0.0f;
 
-	numPerMeshUbos *= render_swapchain.framebuffers.size();
-	numGlobalUbos *= render_swapchain.framebuffers.size();
-
-	std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
-		{ vk::DescriptorType::eStorageBuffer, numPerMeshUbos },
-		{ vk::DescriptorType::eUniformBuffer, numGlobalUbos }
-	};
-
-	uint32_t totalSets = numPerMeshUbos + numGlobalUbos;
-
-	vk::DescriptorPoolCreateInfo descriptorPoolInfo;
-	descriptorPoolInfo.poolSizeCount = descriptorPoolSizes.size();
-	descriptorPoolInfo.pPoolSizes = descriptorPoolSizes.data();
-	descriptorPoolInfo.maxSets = totalSets;
-
-	descriptor_pool = context->primary_logical_device.createDescriptorPool(descriptorPoolInfo);
-
-	if (!descriptor_pool) {
-		LOG_ERROR("Failed to create descriptor pool");
-		return;
-	}
+	texture_sampler = context->primary_logical_device.createSampler(samplerInfo);
 
 	/*
 	* Finish initialization
@@ -164,7 +153,14 @@ void RendererImpl::deinit() {
 	if (is_initialized()) {
 		context->primary_logical_device.waitIdle();
 
+		context->primary_logical_device.destroy(texture_sampler);
+
 		context->primary_logical_device.destroy(descriptor_pool);
+
+		for (auto& texture : textures) {
+			context->primary_logical_device.destroy(texture.second.view);
+			context->destroy_texture(texture.second.texture);
+		}
 
 		for (auto& bufferList : frame_data_buffers) {
 			for (auto& buffer : bufferList.second) {
@@ -244,23 +240,60 @@ RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipeline
 		break;
 	}
 
-	// Allocate descriptor sets
-	std::vector<vk::DescriptorSetLayout> layouts(render_swapchain.framebuffers.size(), pipelines[Name].descriptor_set_layout);
+	return Error::OK;
+}
 
-	vk::DescriptorSetAllocateInfo descriptorSetInfo;
-	descriptorSetInfo.descriptorPool = descriptor_pool;
-	descriptorSetInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-	descriptorSetInfo.pSetLayouts = layouts.data();
+RendererImpl::Error RendererImpl::register_texture(const std::string& Name, const Image& Image) {
+	return register_texture(std::hash<std::string>()(Name), Image);
+}
 
-	descriptor_sets[Name] = context->primary_logical_device.allocateDescriptorSets(descriptorSetInfo);
+RendererImpl::Error RendererImpl::register_texture(StringHash Name, const Image& Image) {
+	if (textures.contains(Name)) {
+		return Error::TEXTURE_WITH_NAME_ALREADY_EXISTS;
+	}
 
+	TextureAllocation texture = context->create_texture_2d({
+		static_cast<uint32_t>(Image.width),
+		static_cast<uint32_t>(Image.height)
+	});
+	context->upload_texture(texture, Image);
+
+	vk::ImageViewCreateInfo viewInfo;
+	viewInfo.image = texture.image;
+	viewInfo.viewType = vk::ImageViewType::e2D;
+	viewInfo.format = texture.format;
+	viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+
+	vk::ImageView imageView = context->primary_logical_device.createImageView(viewInfo);
+
+	textures[Name] = { texture, imageView };
 
 	return Error::OK;
+}
+
+RendererImpl::Error RendererImpl::set_default_texture(const Image& Image) {
+	if (textures.contains(DEFAULT_TEXTURE_NAME)) {
+		context->primary_logical_device.destroy(textures[DEFAULT_TEXTURE_NAME].view);
+		context->destroy_texture(textures[DEFAULT_TEXTURE_NAME].texture);
+		textures.erase(DEFAULT_TEXTURE_NAME);
+	}
+
+	return register_texture(DEFAULT_TEXTURE_NAME, Image);
 }
 
 Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
 	InternalMesh digestedMesh;
 	digestedMesh.pipeline_hash = std::hash<std::string>()(Mesh.pipeline_name);
+	digestedMesh.color_texture_hash = DEFAULT_TEXTURE_NAME;
+
+	if (!Mesh.texture_name.empty()) {
+		digestedMesh.color_texture_hash = std::hash<std::string>()(Mesh.texture_name);
+	}
+
 	digestedMesh.vertex_count = Mesh.vertices.size();
 	digestedMesh.index_count = Mesh.indices.size();
 
@@ -356,7 +389,7 @@ void RendererImpl::update_frame_data(Swapchain::FrameId ImageIdx) {
 	std::vector<VkDeviceSize> updated_allocation_offsets;
 	std::vector<VkDeviceSize> updated_allocation_sizes;
 
-	for (auto& name : ubo_type_names) {
+	for (auto& name : buffer_type_names) {
 		VmaAllocation activeAllocation = frame_data_buffers[name][ImageIdx].allocation;
 
 		if (name == ModelBuffer::name()) {
@@ -412,13 +445,13 @@ void RendererImpl::update_frame_data(Swapchain::FrameId ImageIdx) {
 
 void RendererImpl::finish_mesh_digestion() {
 	// Allocate buffer objects
-	for (auto& name : ubo_type_names) {
+	for (auto& name : buffer_type_names) {
 		// Only allocate SSBOs that are per mesh
-		if (ubo_type_is_per_mesh[name]) {
+		if (buffer_type_is_per_mesh[name]) {
 			frame_data_buffers[name].resize(render_swapchain.framebuffers.size());
 
 			for (auto& ssbo : frame_data_buffers[name]) {
-				ssbo = context->create_storage_buffer(ubo_type_sizes[name] * meshes.size());
+				ssbo = context->create_storage_buffer(buffer_type_sizes[name] * meshes.size());
 			}
 		}
 		// Allocate UBOs that aren't per mesh
@@ -426,7 +459,76 @@ void RendererImpl::finish_mesh_digestion() {
 			frame_data_buffers[name].resize(render_swapchain.framebuffers.size());
 
 			for (auto& ubo : frame_data_buffers[name]) {
-				ubo = context->create_uniform_buffer(ubo_type_sizes[name]);
+				ubo = context->create_uniform_buffer(buffer_type_sizes[name]);
+			}
+		}
+	}
+
+	// Create descriptor pool
+
+	uint32_t numPerMeshBuffers = 0;
+	uint32_t numGlobalBuffers = 0;
+	// Possible number of texture descriptor sets = # Sampler descriptors * # textures
+	uint32_t numSamplers = sampler_type_names.size();
+	numSamplers *= textures.size();
+
+	for (auto& is_per_mesh : buffer_type_is_per_mesh) {
+		if (is_per_mesh.second) {
+			numPerMeshBuffers++;
+		}
+		else {
+			numGlobalBuffers++;
+		}
+	}
+
+	numPerMeshBuffers *= render_swapchain.framebuffers.size();
+	numGlobalBuffers *= render_swapchain.framebuffers.size();
+
+	std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
+		{ vk::DescriptorType::eStorageBuffer, numPerMeshBuffers },
+		{ vk::DescriptorType::eUniformBuffer, numGlobalBuffers },
+		{ vk::DescriptorType::eCombinedImageSampler, numSamplers }
+	};
+
+	uint32_t totalSets = numPerMeshBuffers + numGlobalBuffers + numSamplers;
+
+	vk::DescriptorPoolCreateInfo descriptorPoolInfo;
+	descriptorPoolInfo.poolSizeCount = descriptorPoolSizes.size();
+	descriptorPoolInfo.pPoolSizes = descriptorPoolSizes.data();
+	descriptorPoolInfo.maxSets = totalSets;
+
+	descriptor_pool = context->primary_logical_device.createDescriptorPool(descriptorPoolInfo);
+
+	if (!descriptor_pool) {
+		LOG_ERROR("Failed to create descriptor pool");
+		return;
+	}
+
+	// Allocate buffer descriptor sets
+	for (auto& pipeline : pipelines) {
+		std::vector<vk::DescriptorSetLayout> bufferLayouts(render_swapchain.framebuffers.size(), pipeline.second.buffer_descriptor_set_layout);
+
+		vk::DescriptorSetAllocateInfo bufferDescriptorSetInfo;
+		bufferDescriptorSetInfo.descriptorPool = descriptor_pool;
+		bufferDescriptorSetInfo.descriptorSetCount = static_cast<uint32_t>(bufferLayouts.size());
+		bufferDescriptorSetInfo.pSetLayouts = bufferLayouts.data();
+
+		buffer_descriptor_sets[pipeline.first] = context->primary_logical_device.allocateDescriptorSets(bufferDescriptorSetInfo);
+	}
+
+	// Allocate texture descriptor sets
+	for (auto& pipeline : pipelines) {
+		for (auto& sampler : sampler_type_names) {
+			for (auto& texture : textures) {
+				vk::DescriptorSetLayout textureLayout = pipeline.second.texture_descriptor_set_layout;
+
+				vk::DescriptorSetAllocateInfo textureDescriptorSetInfo;
+				textureDescriptorSetInfo.descriptorPool = descriptor_pool;
+				textureDescriptorSetInfo.descriptorSetCount = 1;
+				textureDescriptorSetInfo.pSetLayouts = &textureLayout;
+
+				StringHash compositeName = hash_combine({ pipeline.first, sampler, texture.first });
+				texture_descriptor_sets[compositeName] = context->primary_logical_device.allocateDescriptorSets(textureDescriptorSetInfo)[0];
 			}
 		}
 	}
@@ -434,30 +536,69 @@ void RendererImpl::finish_mesh_digestion() {
 	// Populate descriptor sets
 	// Per pipeline
 	for (auto& pipeline : pipelines) {
-		// Per buffer type used by pipeline
-		for (auto& bufferName : pipeline.second.buffer_type_names) {
+		// Per descriptor type used by pipeline
+		for (auto& descriptorName : pipeline.second.descriptor_type_names) {
 			std::vector<vk::WriteDescriptorSet> descriptorWrites;
+			std::list<vk::DescriptorBufferInfo> bufferInfos;
+			std::list<vk::DescriptorImageInfo> imageInfos;
 
-			// Per frame state
-			for (size_t i = 0; i < render_swapchain.framebuffers.size(); i++) {
-				vk::DescriptorBufferInfo bufferInfo;
-				// frame_data_buffers[Buffer Type][Swapchain Image #]
-				bufferInfo.buffer = frame_data_buffers[bufferName][i].buffer;
-				bufferInfo.offset = 0;
-				bufferInfo.range = VK_WHOLE_SIZE;
+			if (pipeline.second.descriptor_is_buffer[descriptorName]) {
+				// Per frame state
+				for (size_t i = 0; i < render_swapchain.framebuffers.size(); i++) {
+					vk::WriteDescriptorSet descriptorWrite;
 
-				vk::WriteDescriptorSet descriptorWrite;
-				// descriptor_sets[Pipeline Name][Swapchain Image #]
-				descriptorWrite.dstSet = descriptor_sets[pipeline.first][i];
-				descriptorWrite.dstBinding = pipeline.second.buffer_layout_bindings[bufferName].binding;
-				descriptorWrite.dstArrayElement = 0;
-				descriptorWrite.descriptorType = pipeline.second.buffer_layout_bindings[bufferName].descriptorType;
-				descriptorWrite.descriptorCount = pipeline.second.buffer_layout_bindings[bufferName].descriptorCount;
-				descriptorWrite.pBufferInfo = &bufferInfo;
-				descriptorWrite.pImageInfo = nullptr;
-				descriptorWrite.pTexelBufferView = nullptr;
+					// buffer_descriptor_sets[Pipeline Name][Swapchain Image #]
+					descriptorWrite.dstSet = buffer_descriptor_sets[pipeline.first][i];
+					descriptorWrite.dstBinding = pipeline.second.descriptor_layout_bindings[descriptorName].binding;
+					descriptorWrite.dstArrayElement = 0;
+					descriptorWrite.descriptorType = pipeline.second.descriptor_layout_bindings[descriptorName].descriptorType;
+					descriptorWrite.descriptorCount = pipeline.second.descriptor_layout_bindings[descriptorName].descriptorCount;
 
-				descriptorWrites.push_back(descriptorWrite);
+					vk::DescriptorBufferInfo bufferInfo;
+					// frame_data_buffers[Buffer Type][Swapchain Image #]
+					bufferInfo.buffer = frame_data_buffers[descriptorName][i].buffer;
+					bufferInfo.offset = 0;
+					bufferInfo.range = VK_WHOLE_SIZE;
+
+					bufferInfos.push_back(bufferInfo);
+
+					descriptorWrite.pBufferInfo = &bufferInfos.back();
+					descriptorWrite.pImageInfo = nullptr;
+					descriptorWrite.pTexelBufferView = nullptr;
+
+					descriptorWrites.push_back(descriptorWrite);
+				}
+			}
+			else {
+				size_t i = 0;
+
+				// Per texture
+				for (auto& texture : textures) {
+					vk::WriteDescriptorSet descriptorWrite;
+
+					// texture_descriptor_sets[Pipeline Name][Sampler Name][Texture Name]
+					StringHash compositeName = hash_combine({ pipeline.first, descriptorName, texture.first });
+					descriptorWrite.dstSet = texture_descriptor_sets[compositeName];
+					descriptorWrite.dstBinding = pipeline.second.descriptor_layout_bindings[descriptorName].binding;
+					descriptorWrite.dstArrayElement = 0;
+					descriptorWrite.descriptorType = pipeline.second.descriptor_layout_bindings[descriptorName].descriptorType;
+					descriptorWrite.descriptorCount = pipeline.second.descriptor_layout_bindings[descriptorName].descriptorCount;
+
+					vk::DescriptorImageInfo imageInfo;
+					imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+					imageInfo.imageView = texture.second.view;
+					imageInfo.sampler = texture_sampler;
+
+					imageInfos.push_back(imageInfo);
+
+					descriptorWrite.pBufferInfo = nullptr;
+					descriptorWrite.pImageInfo = &imageInfos.back();
+					descriptorWrite.pTexelBufferView = nullptr;
+
+					descriptorWrites.push_back(descriptorWrite);
+
+					i++;
+				}
 			}
 
 			context->primary_logical_device.updateDescriptorSets(descriptorWrites, nullptr);
@@ -499,11 +640,18 @@ void RendererImpl::record_command_buffers() {
 				pipeline->pipeline
 			);
 
+			std::vector<vk::DescriptorSet> descriptorSets = { buffer_descriptor_sets[meshes[meshId].pipeline_hash][i] };
+
+			if (std::find(sampler_type_names.begin(), sampler_type_names.end(), ColorSampler::name()) != sampler_type_names.end()) {
+				StringHash compositeName = hash_combine({ meshes[meshId].pipeline_hash, ColorSampler::name(), meshes[meshId].color_texture_hash });
+				descriptorSets.push_back(texture_descriptor_sets[compositeName]);
+			}
+
 			currentCommandBuffer.bindDescriptorSets(
 				vk::PipelineBindPoint::eGraphics,
 				pipeline->pipeline_layout,
 				0,
-				descriptor_sets[meshes[meshId].pipeline_hash][i],
+				descriptorSets,
 				nullptr
 			);
 

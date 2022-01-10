@@ -22,7 +22,7 @@ set(SOURCE
 	"source/gfxpipeline.cpp"
 	"include/mesh.h"
 	"source/mesh.cpp"
-	"source/vma_impl.cpp"
+	"source/deps_impl.cpp"
 	"include/renderingtypes.h"
 )
 
@@ -46,7 +46,8 @@ target_include_directories(
 	${ProjectName}
 	PUBLIC
 	"include"
-	"../Dependencies/VulkanMemoryAllocator/include"
+	${VMA_INCLUDE_DIR}
+	${STB_INCLUDE_DIR}
 )
 
 target_link_libraries(
@@ -57,4 +58,11 @@ target_link_libraries(
 	glm::glm
 	Vulkan::Vulkan
 )
+
+target_compile_definitions(
+	${ProjectName}
+	PUBLIC
+	"GLM_FORCE_DEPTH_ZERO_TO_ONE"
+)
+
 # TODO: Add tests and install targets if needed.

@@ -18,24 +18,30 @@ int main(int argc, char** argv) {
 	GfxContext context;
 	context.init(&window, APP_NAME);
 
-	Renderer<ModelBuffer, CameraBuffer> renderer;
+	Renderer<ModelBuffer, CameraBuffer, ColorSampler> renderer;
 	renderer.init(&context);
 
-	GfxPipeline<Vertex, ModelBuffer, CameraBuffer> base_pipeline;
+	GfxPipeline<Vertex, ModelBuffer, CameraBuffer, ColorSampler> base_pipeline;
 	base_pipeline
 		.set_vertex_shader("shaders/base.vert.bin")
 		.set_fragment_shader("shaders/base.frag.bin");
 
 	renderer.register_pipeline("base", base_pipeline);
 
+	Retval<Image, AssetError> defaulttex = load_image("textures/default.png");
+	Retval<Image, AssetError> colortest = load_image("textures/colortest.png");
+
+	renderer.set_default_texture(defaulttex.value);
+	renderer.register_texture("colortest", colortest.value);
+
 	Mesh triangle;
 	ModelTransform t1;
 	t1.position.x = -0.5;
 	triangle.pipeline_name = "base";
 	triangle.vertices = {
-		{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}},
-		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+		{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}
 	};
 	triangle.indices = {
 		0, 1, 2
@@ -46,9 +52,9 @@ int main(int argc, char** argv) {
 	t2.position.x = 0.5;
 	triangle2.pipeline_name = "base";
 	triangle2.vertices = {
-		{{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+		{{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}
 	};
 	triangle2.indices = {
 		0, 1, 2
@@ -57,11 +63,12 @@ int main(int argc, char** argv) {
 	Mesh square;
 	ModelTransform s1;
 	square.pipeline_name = "base";
+	square.texture_name = "colortest";
 	square.vertices = {
-		{{-0.25f, 0.25f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		{{0.25f, 0.25f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{0.25f, -0.25f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-		{{-0.25f, -0.25f, 0.0f}, {1.0f, 1.0f, 0.0f}}
+		{{-0.25f, 0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.25f, 0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+		{{0.25f, -0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+		{{-0.25f, -0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
 	};
 	square.indices = {
 		0, 1, 2, 2, 3, 0
@@ -138,8 +145,10 @@ int main(int argc, char** argv) {
 		std::chrono::milliseconds t = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time);
 
 		float sin_t = glm::sin(static_cast<float>(t.count()) / 200.f);
+		float rocker_t = glm::pow(glm::abs(sin_t) + 1.0f, 2.0f) / 2.0f;
 
 		s1.position.x = sin_t;
+		s1.scale = { rocker_t, rocker_t, rocker_t };
 		t1.position.y = sin_t;
 		t2.position.y = -sin_t;
 

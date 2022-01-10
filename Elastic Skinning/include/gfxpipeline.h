@@ -45,14 +45,16 @@ struct GfxPipelineImpl {
 	bool is_initialized() { return is_init; }
 	bool is_swapchain_dependent() { return should_init_with_swapchain; };
 
-	vk::DescriptorSetLayout descriptor_set_layout;
+	vk::DescriptorSetLayout buffer_descriptor_set_layout;
+	vk::DescriptorSetLayout texture_descriptor_set_layout;
 	vk::PipelineLayout pipeline_layout;
 	vk::Pipeline pipeline;
 
 	vk::PushConstantRange mesh_id_push_constant{ vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32_t) };
 
-	std::vector<StringHash> buffer_type_names;
-	std::unordered_map<StringHash, vk::DescriptorSetLayoutBinding> buffer_layout_bindings;
+	std::vector<StringHash> descriptor_type_names;
+	std::unordered_map<StringHash, bool> descriptor_is_buffer;
+	std::unordered_map<StringHash, vk::DescriptorSetLayoutBinding> descriptor_layout_bindings;
 
 protected:
 
@@ -73,7 +75,7 @@ protected:
 };
 
 
-template <VertexType Vtx, BufferObjectType... Buf>
+template <VertexType Vtx, DescriptorType... Descriptors>
 struct GfxPipeline : public GfxPipelineImpl {
 
 	GfxPipeline() {
@@ -84,13 +86,16 @@ struct GfxPipeline : public GfxPipelineImpl {
 			vertex_attribute_descriptions[i] = Vtx::attribute_description()[i];
 		}
 
-		std::vector<StringHash> names = { (Buf::name())... };
-		std::vector<vk::DescriptorSetLayoutBinding> bindings = { (Buf::layout_binding())... };
+		std::vector<StringHash> names = { (Descriptors::name())... };
+		std::vector<bool> isBuffer = { (BufferObjectType<Descriptors>)... };
+		std::vector<vk::DescriptorSetLayoutBinding> bindings = { (Descriptors::layout_binding())... };
 
 		for (size_t i = 0; i < names.size(); i++) {
-			buffer_layout_bindings[names[i]] = bindings[i];
+			descriptor_is_buffer[names[i]] = isBuffer[i];
+			descriptor_layout_bindings[names[i]] = bindings[i];
 		}
 
-		buffer_type_names = names;
+		descriptor_type_names = names;
 	}
+
 };

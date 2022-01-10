@@ -1,5 +1,7 @@
 #include "asset.h"
 
+#include <stb_image.h>
+
 #include <fstream>
 
 Retval<BinaryBlob, AssetError> load_binary_asset(std::filesystem::path path) {
@@ -58,4 +60,37 @@ Retval<std::string, AssetError> load_text_asset(std::filesystem::path path) {
 	}
 
 	return { ret, AssetError::OK };
+}
+
+Retval<Image, AssetError> load_image(std::filesystem::path path) {
+
+	auto fileData = load_binary_asset(path);
+
+	if (fileData.status != AssetError::OK) {
+		return { {}, fileData.status };
+	}
+
+	int width, height, channels;
+	const stbi_uc* data = reinterpret_cast<const stbi_uc*>(fileData.value.data());
+	int length = static_cast<int>(fileData.value.size());
+	stbi_uc* pixels = stbi_load_from_memory(data, length, &width, &height, &channels, STBI_rgb_alpha);
+
+	if (!pixels) {
+		return { {}, AssetError::INVALID_DATA };
+	}
+
+	const uint8_t* outData = reinterpret_cast<const uint8_t*>(pixels);
+	auto outBlob = BinaryBlob(outData, outData + (width * height * 4));
+
+	stbi_image_free(pixels);
+
+	return {
+		{
+			outBlob,
+			static_cast<size_t>(width),
+			static_cast<size_t>(height),
+			static_cast<size_t>(channels)
+		},
+		AssetError::OK
+	};
 }

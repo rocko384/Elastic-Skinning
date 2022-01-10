@@ -18,5 +18,8 @@ find_package(Vulkan REQUIRED FATAL_ERROR)
 add_subdirectory("Dependencies/glm")
 add_subdirectory("Dependencies/SDL")
 
+set (VMA_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/Dependencies/VulkanMemoryAllocator/include")
+set (STB_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/Dependencies/stb")
+
 # Include sub-projects.
 add_subdirectory ("Elastic Skinning")

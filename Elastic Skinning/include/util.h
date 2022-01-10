@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <initializer_list>
+#include <span>
 #include <concepts>
 #include <type_traits>
 #include <utility>
@@ -12,6 +14,17 @@ struct Retval {
 };
 
 using StringHash = size_t;
+
+inline size_t hash_combine(std::initializer_list<size_t> hashes) {
+	std::span data{ hashes };
+	size_t ret = 0;
+
+	for (size_t i = 0; i < data.size(); i++) {
+		ret ^= data[i] + 0x9e3779b9 + (ret << 6) + (ret >> 2);
+	}
+
+	return ret;
+}
 
 template <typename T>
 concept ArrayType =

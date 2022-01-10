@@ -12,6 +12,8 @@ struct Mesh {
 	using IndexType = uint32_t;
 
 	std::string pipeline_name;
+	std::string texture_name;
+
 	std::vector<VertexType> vertices;
 	std::vector<IndexType> indices;
 

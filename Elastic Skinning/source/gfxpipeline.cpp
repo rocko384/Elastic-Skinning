@@ -225,30 +225,47 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 	dynamicStateInfo.dynamicStateCount = 2;
 	dynamicStateInfo.pDynamicStates = dynamicStates;
 
-	// Descriptor set layout
-	std::vector<vk::DescriptorSetLayoutBinding> layoutBindings;
+	// Descriptor set layouts
+	std::vector<vk::DescriptorSetLayoutBinding> bufferLayoutBindings;
+	std::vector<vk::DescriptorSetLayoutBinding> textureLayoutBindings;
 
-	for (auto& binding : buffer_layout_bindings) {
-		layoutBindings.push_back(binding.second);
+	for (auto& binding : descriptor_layout_bindings) {
+		if (descriptor_is_buffer[binding.first]) {
+			bufferLayoutBindings.push_back(binding.second);
+		}
+		else {
+			textureLayoutBindings.push_back(binding.second);
+		}
 	}
 
-	vk::DescriptorSetLayoutCreateInfo descriptorLayoutInfo;
-	descriptorLayoutInfo.bindingCount = layoutBindings.size();
-	descriptorLayoutInfo.pBindings = layoutBindings.data();
+	vk::DescriptorSetLayoutCreateInfo bufferDescriptorLayoutInfo;
+	bufferDescriptorLayoutInfo.bindingCount = bufferLayoutBindings.size();
+	bufferDescriptorLayoutInfo.pBindings = bufferLayoutBindings.data();
 
-	descriptor_set_layout = context->primary_logical_device.createDescriptorSetLayout(descriptorLayoutInfo);
+	buffer_descriptor_set_layout = context->primary_logical_device.createDescriptorSetLayout(bufferDescriptorLayoutInfo);
+	
+	vk::DescriptorSetLayoutCreateInfo textureDescriptorLayoutInfo;
+	textureDescriptorLayoutInfo.bindingCount = textureLayoutBindings.size();
+	textureDescriptorLayoutInfo.pBindings = textureLayoutBindings.data();
 
-	if (!descriptor_set_layout) {
+	texture_descriptor_set_layout = context->primary_logical_device.createDescriptorSetLayout(textureDescriptorLayoutInfo);
+
+	if (!buffer_descriptor_set_layout || !texture_descriptor_set_layout) {
 		return Error::FAIL_CREATE_DESCRIPTOR_SET_LAYOUT;
 	}
+
+	std::vector<vk::DescriptorSetLayout> descriptorSetLayouts{
+		buffer_descriptor_set_layout,
+		texture_descriptor_set_layout
+	};
 
 	// Push constant ranges
 	std::vector<vk::PushConstantRange> pushConstantRanges{ mesh_id_push_constant };
 
 	// Pipeline layout
 	vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
-	pipelineLayoutInfo.setLayoutCount = 1;
-	pipelineLayoutInfo.pSetLayouts = &descriptor_set_layout;
+	pipelineLayoutInfo.setLayoutCount = descriptorSetLayouts.size();
+	pipelineLayoutInfo.pSetLayouts = descriptorSetLayouts.data();
 	pipelineLayoutInfo.pushConstantRangeCount = pushConstantRanges.size();
 	pipelineLayoutInfo.pPushConstantRanges = pushConstantRanges.data();
 
@@ -307,10 +324,11 @@ GfxPipelineImpl::Error GfxPipelineImpl::reinit() {
 
 void GfxPipelineImpl::deinit() {
 	if (is_initialized()) {
+		is_init = false;
+
 		context->primary_logical_device.destroy(pipeline);
 		context->primary_logical_device.destroy(pipeline_layout);
-		context->primary_logical_device.destroy(descriptor_set_layout);
+		context->primary_logical_device.destroy(buffer_descriptor_set_layout);
+		context->primary_logical_device.destroy(texture_descriptor_set_layout);
 	}
-
-	is_init = false;
 }

@@ -17,6 +17,8 @@
 
 class RendererImpl {
 
+	static const StringHash DEFAULT_TEXTURE_NAME = 1;
+
 public:
 
 	enum class Error {
@@ -24,7 +26,8 @@ public:
 		PIPELINE_WITH_NAME_ALREADY_EXISTS,
 		PIPELINE_INIT_ERROR,
 		FAILED_TO_ALLOCATE_BUFFER,
-		FAILED_TO_ALLOCATE_COMMAND_BUFFERS
+		FAILED_TO_ALLOCATE_COMMAND_BUFFERS,
+		TEXTURE_WITH_NAME_ALREADY_EXISTS
 	};
 
 	using MeshId = uint32_t;
@@ -38,6 +41,10 @@ public:
 
 	Error register_pipeline(const std::string& Name, GfxPipelineImpl& Pipeline);
 	Error register_pipeline(StringHash Name, GfxPipelineImpl& Pipeline);
+
+	Error register_texture(const std::string& Name, const Image& Image);
+	Error register_texture(StringHash Name, const Image& Imaage);
+	Error set_default_texture(const Image& Image);
 
 	Retval<MeshId, Error> digest_mesh(Mesh Mesh, ModelTransform* Transform);
 
@@ -70,21 +77,35 @@ protected:
 
 	std::unordered_map<StringHash, GfxPipelineImpl> pipelines;
 
-	vk::DescriptorPool descriptor_pool;
-	// descriptor_sets[Pipeline Name][Swapchain Image #]
-	std::unordered_map<StringHash, std::vector<vk::DescriptorSet>> descriptor_sets;
+	struct InternalTexture {
+		TextureAllocation texture;
+		vk::ImageView view;
+	};
 
-	std::vector<StringHash> ubo_type_names;
-	std::unordered_map<StringHash, size_t> ubo_type_sizes;
-	std::unordered_map<StringHash, bool> ubo_type_is_per_mesh;
+	std::unordered_map<StringHash, InternalTexture> textures;
+
+	vk::DescriptorPool descriptor_pool;
+	// buffer_descriptor_sets[Pipeline Name][Swapchain Image #]
+	std::unordered_map<StringHash, std::vector<vk::DescriptorSet>> buffer_descriptor_sets;
+	// texture_descriptor_sets[hash_combine(Pipeline Name, Sampler Name, Texture Name)]
+	// a la: texture_descriptor_sets[Pipeline Name][Sampler Name][Texture Name]
+	std::unordered_map<StringHash, vk::DescriptorSet> texture_descriptor_sets;
+
+	std::vector<StringHash> buffer_type_names;
+	std::vector<StringHash> sampler_type_names;
+	std::unordered_map<StringHash, size_t> buffer_type_sizes;
+	std::unordered_map<StringHash, bool> buffer_type_is_per_mesh;
 	// frame_data_buffers[Buffer Type][Swapchain Image #]
 	std::unordered_map<StringHash, std::vector<BufferAllocation>> frame_data_buffers;
+
+	vk::Sampler texture_sampler;
 
 	struct InternalMesh {
 		BufferAllocation vertex_buffer;
 		BufferAllocation index_buffer;
 
 		StringHash pipeline_hash{ 0 };
+		StringHash color_texture_hash{ DEFAULT_TEXTURE_NAME };
 
 		size_t vertex_count{ 0 };
 		size_t index_count{ 0 };
@@ -101,21 +122,53 @@ protected:
 
 };
 
-template <BufferObjectType... SupportedBufferTypes>
+template <DescriptorType... SupportedDescriptors>
 class Renderer : public RendererImpl {
 	
 public:
 
 	Renderer() {
-		std::vector<StringHash> names = { (SupportedBufferTypes::name())... };
-		std::vector<size_t> sizes = { (sizeof(SupportedBufferTypes))... };
-		std::vector<bool> perMesh = { (SupportedBufferTypes::is_per_mesh())... };
+
+		std::vector<StringHash> names = { (SupportedDescriptors::name())... };
+		std::vector<bool> isBuffer = { (BufferObjectType<SupportedDescriptors>)... };
+		std::vector<bool> isPerMeshTemp = { (is_per_mesh_impl<SupportedDescriptors>())... };
+		std::vector<size_t> sizesTemp = { (sizeof(SupportedDescriptors))... };
+
+		std::vector<StringHash> bufferNames;
+		std::vector<bool> perMesh;
+		std::vector<size_t> sizes;
+		std::vector<StringHash> samplerNames;
 
 		for (size_t i = 0; i < names.size(); i++) {
-			ubo_type_sizes[names[i]] = sizes[i];
-			ubo_type_is_per_mesh[names[i]] = perMesh[i];
+			if (isBuffer[i]) {
+				bufferNames.push_back(names[i]);
+				perMesh.push_back(isPerMeshTemp[i]);
+				sizes.push_back(sizesTemp[i]);
+			}
+			else {
+				samplerNames.push_back(names[i]);
+			}
 		}
 
-		ubo_type_names = names;
+		for (size_t i = 0; i < bufferNames.size(); i++) {
+			buffer_type_sizes[bufferNames[i]] = sizes[i];
+			buffer_type_is_per_mesh[bufferNames[i]] = perMesh[i];
+		}
+
+		buffer_type_names = bufferNames;
+		sampler_type_names = samplerNames;
 	}
+
+private:
+
+	template <BufferObjectType T>
+	bool is_per_mesh_impl() {
+		return T::is_per_mesh();
+	}
+
+	template <SamplerType T>
+	bool is_per_mesh_impl() {
+		return false;
+	}
+
 };
