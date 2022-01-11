@@ -45,39 +45,6 @@ void RendererImpl::init(GfxContext* Context) {
 		}
 	);
 
-	/*
-	* Create the swapchain
-	*/
-
-	auto swapchainError = render_swapchain.init(context);
-
-	if (swapchainError != Swapchain::Error::OK) {
-		switch (swapchainError) {
-		case Swapchain::Error::INVALID_CONTEXT:
-			LOG_ERROR("Swapchain was given invalid graphics context");
-			return;
-			break;
-		case Swapchain::Error::UNINITIALIZED_CONTEXT:
-			LOG_ERROR("Swapchain was given uninitalized graphics context");
-			return;
-			break;
-		case Swapchain::Error::FAIL_CREATE_SWAPCHAIN:
-			LOG_ERROR("Failed to create swapchain");
-			return;
-			break;
-		case Swapchain::Error::FAIL_CREATE_IMAGE_VIEW:
-			LOG_ERROR("Failed to create swapchain image view");
-			return;
-			break;
-		case Swapchain::Error::FAIL_CREATE_SYNCH_OBJECTS:
-			LOG_ERROR("Failed to create render synch primitives");
-			return;
-			break;
-		default:
-			break;
-		}
-	}
-
 	create_render_state();
 
 	/*
@@ -174,8 +141,6 @@ void RendererImpl::deinit() {
 		}
 		
 		destroy_render_state();
-
-		render_swapchain.deinit();
 	}
 
 	is_init = false;
@@ -380,6 +345,39 @@ void RendererImpl::draw_frame() {
 
 void RendererImpl::create_render_state() {
 	/*
+	* Create the swapchain
+	*/
+
+	auto swapchainError = render_swapchain.init(context);
+
+	if (swapchainError != Swapchain::Error::OK) {
+		switch (swapchainError) {
+		case Swapchain::Error::INVALID_CONTEXT:
+			LOG_ERROR("Swapchain was given invalid graphics context");
+			return;
+			break;
+		case Swapchain::Error::UNINITIALIZED_CONTEXT:
+			LOG_ERROR("Swapchain was given uninitalized graphics context");
+			return;
+			break;
+		case Swapchain::Error::FAIL_CREATE_SWAPCHAIN:
+			LOG_ERROR("Failed to create swapchain");
+			return;
+			break;
+		case Swapchain::Error::FAIL_CREATE_IMAGE_VIEW:
+			LOG_ERROR("Failed to create swapchain image view");
+			return;
+			break;
+		case Swapchain::Error::FAIL_CREATE_SYNCH_OBJECTS:
+			LOG_ERROR("Failed to create render synch primitives");
+			return;
+			break;
+		default:
+			break;
+		}
+	}
+
+	/*
 	* Create depth buffers
 	*/
 
@@ -542,6 +540,8 @@ void RendererImpl::destroy_render_state() {
 		context->primary_logical_device.destroy(depthBuffer.view);
 		context->destroy_texture(depthBuffer.texture);
 	}
+
+	render_swapchain.deinit();
 }
 
 bool RendererImpl::should_render() {
@@ -938,8 +938,6 @@ void RendererImpl::window_maximized_callback() {
 
 void RendererImpl::window_restored_callback() {
 	context->primary_logical_device.waitIdle();
-
-	render_swapchain.reinit();
 
 	destroy_render_state();
 	create_render_state();
