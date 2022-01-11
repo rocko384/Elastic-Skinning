@@ -9,6 +9,11 @@
 #include <concepts>
 #include <type_traits>
 
+enum class RenderTarget {
+	Swapchain,
+	DepthBuffer
+};
+
 struct ModelTransform {
 	glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
 	glm::vec3 position{ 0.0f, 0.0f, 0.0f };

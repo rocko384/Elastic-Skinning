@@ -17,8 +17,6 @@ struct Swapchain {
 		UNINITIALIZED_CONTEXT,
 		FAIL_CREATE_SWAPCHAIN,
 		FAIL_CREATE_IMAGE_VIEW,
-		FAIL_CREATE_RENDER_PASS,
-		FAIL_CREATE_FRAMEBUFFER,
 		FAIL_CREATE_SYNCH_OBJECTS,
 		FAIL_ACQUIRE_IMAGE,
 		OUT_OF_DATE,
@@ -35,6 +33,11 @@ struct Swapchain {
 
 	bool is_initialized() { return is_init; }
 
+	size_t size() {
+		assert(images.size() == image_views.size());
+		return images.size();
+	}
+
 	struct Frame {
 		vk::Semaphore image_available_semaphore;
 		vk::Semaphore render_finished_semaphore;
@@ -49,8 +52,9 @@ struct Swapchain {
 	vk::SwapchainKHR swapchain;
 	vk::Format format;
 	vk::Extent2D extent;
-	vk::RenderPass render_pass;
-	std::vector<vk::Framebuffer> framebuffers;
+
+	std::vector<vk::Image> images;
+	std::vector<vk::ImageView> image_views;
 
 	size_t max_frames_in_flight{ 0 };
 	size_t current_frame{ 0 };
@@ -60,9 +64,6 @@ private:
 	bool is_init{ false };
 
 	GfxContext* context{ nullptr };
-
-	std::vector<vk::Image> images;
-	std::vector<vk::ImageView> image_views;
 
 	std::vector<vk::Semaphore> image_available_semaphores;
 	std::vector<vk::Semaphore> render_finished_semaphores;

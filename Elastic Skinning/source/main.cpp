@@ -21,11 +21,17 @@ int main(int argc, char** argv) {
 	Renderer<ModelBuffer, CameraBuffer, ColorSampler> renderer;
 	renderer.init(&context);
 
+	GfxPipeline<Vertex, ModelBuffer, CameraBuffer> base_depth_pipeline;
+	base_depth_pipeline
+		.set_vertex_shader("shaders/base.vert.bin")
+		.set_target(RenderTarget::DepthBuffer);
+
 	GfxPipeline<Vertex, ModelBuffer, CameraBuffer, ColorSampler> base_pipeline;
 	base_pipeline
 		.set_vertex_shader("shaders/base.vert.bin")
 		.set_fragment_shader("shaders/base.frag.bin");
 
+	renderer.register_pipeline("base_depth", base_depth_pipeline);
 	renderer.register_pipeline("base", base_pipeline);
 
 	Retval<Image, AssetError> defaulttex = load_image("textures/default.png");
@@ -38,6 +44,7 @@ int main(int argc, char** argv) {
 	ModelTransform t1;
 	t1.position.x = -0.5;
 	triangle.pipeline_name = "base";
+	triangle.depth_pipeline_name = "base_depth";
 	triangle.vertices = {
 		{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
 		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -51,6 +58,7 @@ int main(int argc, char** argv) {
 	ModelTransform t2;
 	t2.position.x = 0.5;
 	triangle2.pipeline_name = "base";
+	triangle2.depth_pipeline_name = "base_depth";
 	triangle2.vertices = {
 		{{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
 		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -62,7 +70,9 @@ int main(int argc, char** argv) {
 
 	Mesh square;
 	ModelTransform s1;
+	s1.position.z = 0.1f;
 	square.pipeline_name = "base";
+	square.depth_pipeline_name = "base_depth";
 	square.texture_name = "colortest";
 	square.vertices = {
 		{{-0.25f, 0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
@@ -77,6 +87,7 @@ int main(int argc, char** argv) {
 	Mesh x_note;
 	ModelTransform x;
 	x_note.pipeline_name = "base";
+	x_note.depth_pipeline_name = "base_depth";
 	x_note.vertices = {
 		{{-0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}},
 		{{0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}},
@@ -91,6 +102,7 @@ int main(int argc, char** argv) {
 	Mesh y_note;
 	ModelTransform y;
 	y_note.pipeline_name = "base";
+	y_note.depth_pipeline_name = "base_depth";
 	y_note.vertices = {
 		{{-0.125f, 0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}},
 		{{0.125f, 0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}},
@@ -105,6 +117,7 @@ int main(int argc, char** argv) {
 	Mesh z_note;
 	ModelTransform z;
 	z_note.pipeline_name = "base";
+	z_note.depth_pipeline_name = "base_depth";
 	z_note.vertices = {
 		{{-0.125f, 0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}},
 		{{0.125f, 0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}},

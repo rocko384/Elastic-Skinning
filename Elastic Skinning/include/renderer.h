@@ -24,6 +24,7 @@ public:
 	enum class Error {
 		OK,
 		PIPELINE_WITH_NAME_ALREADY_EXISTS,
+		PIPELINE_HAS_UNSUPPORTED_RENDER_TARGET,
 		PIPELINE_INIT_ERROR,
 		FAILED_TO_ALLOCATE_BUFFER,
 		FAILED_TO_ALLOCATE_COMMAND_BUFFERS,
@@ -54,6 +55,9 @@ public:
 
 protected:
 
+	void create_render_state();
+	void destroy_render_state();
+
 	bool should_render();
 
 	void update_frame_data(Swapchain::FrameId ImageIdx);
@@ -72,15 +76,22 @@ protected:
 	bool is_init{ false };
 	bool is_first_render{ true };
 
-	GfxContext* context{ nullptr };
-	Swapchain render_swapchain;
-
-	std::unordered_map<StringHash, GfxPipelineImpl> pipelines;
-
 	struct InternalTexture {
 		TextureAllocation texture;
 		vk::ImageView view;
 	};
+
+	GfxContext* context{ nullptr };
+	Swapchain render_swapchain;
+	std::vector<InternalTexture> depthbuffers;
+
+	vk::RenderPass geometry_render_pass;
+	uint32_t depth_subpass;
+	uint32_t color_subpass;
+
+	std::vector<vk::Framebuffer> framebuffers;
+
+	std::unordered_map<StringHash, GfxPipelineImpl> pipelines;
 
 	std::unordered_map<StringHash, InternalTexture> textures;
 
@@ -105,6 +116,7 @@ protected:
 		BufferAllocation index_buffer;
 
 		StringHash pipeline_hash{ 0 };
+		StringHash depth_pipeline_hash{ 0 };
 		StringHash color_texture_hash{ DEFAULT_TEXTURE_NAME };
 
 		size_t vertex_count{ 0 };

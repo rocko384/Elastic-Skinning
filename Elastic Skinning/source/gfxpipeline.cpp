@@ -36,14 +36,13 @@ GfxPipelineImpl& GfxPipelineImpl::set_fragment_shader(std::filesystem::path path
 	return *this;
 }
 
-GfxPipelineImpl& GfxPipelineImpl::set_target(/* RenderTarget Target */) {
-	should_init_with_swapchain = false;
+GfxPipelineImpl& GfxPipelineImpl::set_target(RenderTarget Target) {
+	target = Target;
 
 	return *this;
 }
 
-
-GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swapchain) {
+GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, vk::Extent2D* Viewport, vk::RenderPass* RenderPass, uint32_t Subpass) {
 	if (!Context) {
 		return Error::INVALID_CONTEXT;
 	}
@@ -52,19 +51,17 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 		return Error::UNINITIALIZED_CONTEXT;
 	}
 
-	if (!Swapchain) {
-		return Error::INVALID_SWAPCHAIN;
-	}
-
-	if (!Swapchain->is_initialized()) {
-		return Error::UNINITIALIZED_SWAPCHAIN;
+	if (!RenderPass) {
+		return Error::INVALID_RENDER_PASS;
 	}
 
 	context = Context;
-	swapchain = Swapchain;
+	viewport_size = Viewport;
+	render_pass = RenderPass;
+	subpass = Subpass;
 
 	// Shader stage definition
-	
+
 	std::vector<vk::ShaderModule> shaderModules;
 	std::vector<vk::PipelineShaderStageCreateInfo> shaderStages;
 
@@ -153,14 +150,14 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 	vk::Viewport viewport;
 	viewport.x = 0.0f;
 	viewport.y = 0.0f;
-	viewport.width = swapchain->extent.width;
-	viewport.height = swapchain->extent.height;
+	viewport.width = viewport_size->width;
+	viewport.height = viewport_size->height;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
 
 	vk::Rect2D scissor;
 	scissor.offset = vk::Offset2D{ 0, 0 };
-	scissor.extent = swapchain->extent;
+	scissor.extent = *viewport_size;
 
 	vk::PipelineViewportStateCreateInfo viewportStateInfo;
 	viewportStateInfo.viewportCount = 1;
@@ -189,6 +186,25 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 	multisampleInfo.pSampleMask = nullptr;
 	multisampleInfo.alphaToCoverageEnable = VK_FALSE;
 	multisampleInfo.alphaToOneEnable = VK_FALSE;
+
+	// Depth stencil state
+	vk::PipelineDepthStencilStateCreateInfo depthStencilState;
+	depthStencilState.depthTestEnable = VK_TRUE;
+	
+	if (target == RenderTarget::DepthBuffer) {
+		depthStencilState.depthWriteEnable = VK_TRUE;
+	}
+	else {
+		depthStencilState.depthWriteEnable = VK_FALSE;
+	}
+
+	depthStencilState.depthCompareOp = vk::CompareOp::eLessOrEqual;
+	depthStencilState.depthBoundsTestEnable = VK_FALSE;
+	depthStencilState.stencilTestEnable = VK_FALSE;
+	depthStencilState.front = vk::StencilOp(0);
+	depthStencilState.back = vk::StencilOp(0);
+	depthStencilState.minDepthBounds = 0.0f;
+	depthStencilState.maxDepthBounds = 1.0f;
 
 	// Color blending
 	vk::PipelineColorBlendAttachmentState colorBlendAttachment;
@@ -243,7 +259,7 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 	bufferDescriptorLayoutInfo.pBindings = bufferLayoutBindings.data();
 
 	buffer_descriptor_set_layout = context->primary_logical_device.createDescriptorSetLayout(bufferDescriptorLayoutInfo);
-	
+
 	vk::DescriptorSetLayoutCreateInfo textureDescriptorLayoutInfo;
 	textureDescriptorLayoutInfo.bindingCount = textureLayoutBindings.size();
 	textureDescriptorLayoutInfo.pBindings = textureLayoutBindings.data();
@@ -285,12 +301,12 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 	pipelineInfo.pViewportState = &viewportStateInfo;
 	pipelineInfo.pRasterizationState = &rasterizerInfo;
 	pipelineInfo.pMultisampleState = &multisampleInfo;
-	pipelineInfo.pDepthStencilState = nullptr;
+	pipelineInfo.pDepthStencilState = &depthStencilState;
 	pipelineInfo.pColorBlendState = &colorBlendInfo;
 	pipelineInfo.pDynamicState = nullptr; // &dynamicStateInfo;
 	pipelineInfo.layout = pipeline_layout;
-	pipelineInfo.renderPass = swapchain->render_pass;
-	pipelineInfo.subpass = 0;
+	pipelineInfo.renderPass = *render_pass;
+	pipelineInfo.subpass = subpass;
 	pipelineInfo.basePipelineHandle = nullptr;
 	pipelineInfo.basePipelineIndex = -1;
 
@@ -306,7 +322,6 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 		context->primary_logical_device.destroy(shader);
 	}
 
-
 	is_init = true;
 
 	return Error::OK;
@@ -315,11 +330,7 @@ GfxPipelineImpl::Error GfxPipelineImpl::init(GfxContext* Context, Swapchain* Swa
 GfxPipelineImpl::Error GfxPipelineImpl::reinit() {
 	deinit();
 
-	if (is_swapchain_dependent()) {
-		return init(context, swapchain);
-	}
-
-	return Error::OK;
+	return init(context, viewport_size, render_pass, subpass);
 }
 
 void GfxPipelineImpl::deinit() {

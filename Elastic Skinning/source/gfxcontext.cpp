@@ -650,12 +650,24 @@ void GfxContext::transition_image_layout(TextureAllocation Texture, vk::Format F
 	vk::PipelineStageFlags sourceStage;
 	vk::PipelineStageFlags destStage;
 
-	if (Old == vk::ImageLayout::eUndefined && New == vk::ImageLayout::eTransferDstOptimal) {
-		barrier.srcAccessMask = vk::AccessFlagBits::eNoneKHR;
-		barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+	if (Old == vk::ImageLayout::eUndefined) {
+		if (New == vk::ImageLayout::eTransferDstOptimal) {
+			barrier.srcAccessMask = vk::AccessFlagBits::eNoneKHR;
+			barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
 
-		sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
-		destStage = vk::PipelineStageFlagBits::eTransfer;
+			sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+			destStage = vk::PipelineStageFlagBits::eTransfer;
+		}
+		else if (New == vk::ImageLayout::eDepthAttachmentOptimal || New == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+			barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+
+			barrier.srcAccessMask = vk::AccessFlagBits::eNoneKHR;
+			barrier.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentRead
+				| vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+
+			sourceStage = vk::PipelineStageFlagBits::eVertexShader;
+			destStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
+		}
 	}
 	else if (Old == vk::ImageLayout::eTransferDstOptimal && New == vk::ImageLayout::eShaderReadOnlyOptimal) {
 		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;

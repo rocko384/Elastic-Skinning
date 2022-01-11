@@ -69,14 +69,6 @@ void RendererImpl::init(GfxContext* Context) {
 			LOG_ERROR("Failed to create swapchain image view");
 			return;
 			break;
-		case Swapchain::Error::FAIL_CREATE_RENDER_PASS:
-			LOG_ERROR("Failed to create swapchain render pass");
-			return;
-			break;
-		case Swapchain::Error::FAIL_CREATE_FRAMEBUFFER:
-			LOG_ERROR("Failed to create swapchain framebuffer");
-			return;
-			break;
 		case Swapchain::Error::FAIL_CREATE_SYNCH_OBJECTS:
 			LOG_ERROR("Failed to create render synch primitives");
 			return;
@@ -85,6 +77,8 @@ void RendererImpl::init(GfxContext* Context) {
 			break;
 		}
 	}
+
+	create_render_state();
 
 	/*
 	* Create command pool
@@ -108,7 +102,7 @@ void RendererImpl::init(GfxContext* Context) {
 	vk::CommandBufferAllocateInfo commandBufferInfo;
 	commandBufferInfo.commandPool = command_pool;
 	commandBufferInfo.level = vk::CommandBufferLevel::ePrimary;
-	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(render_swapchain.framebuffers.size());
+	commandBufferInfo.commandBufferCount = static_cast<uint32_t>(render_swapchain.size());
 
 	primary_render_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
 
@@ -178,6 +172,8 @@ void RendererImpl::deinit() {
 		for (auto& pipeline : pipelines) {
 			pipeline.second.deinit();
 		}
+		
+		destroy_render_state();
 
 		render_swapchain.deinit();
 	}
@@ -199,8 +195,15 @@ RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipeline
 
 	GfxPipelineImpl::Error pipelineError;
 
-	if (pipelines[Name].is_swapchain_dependent()) {
-		pipelineError = pipelines[Name].init(context, &render_swapchain);
+	switch(pipelines[Name].target) {
+	case RenderTarget::Swapchain:
+		pipelineError = pipelines[Name].init(context, &render_swapchain.extent, &geometry_render_pass, color_subpass);
+		break;
+	case RenderTarget::DepthBuffer:
+		pipelineError = pipelines[Name].init(context, &render_swapchain.extent, &geometry_render_pass, depth_subpass);
+	default:
+		return Error::PIPELINE_HAS_UNSUPPORTED_RENDER_TARGET;
+		break;
 	}
 
 	switch (pipelineError) {
@@ -212,12 +215,8 @@ RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipeline
 		LOG_ERROR("Pipeline was given uninitalized graphics context");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
-	case GfxPipelineImpl::Error::INVALID_SWAPCHAIN:
-		LOG_ERROR("Pipeline was given invalid swapchain");
-		return Error::PIPELINE_INIT_ERROR;
-		break;
-	case GfxPipelineImpl::Error::UNINITIALIZED_SWAPCHAIN:
-		LOG_ERROR("Pipeline was given uninitialized swapchain");
+	case GfxPipelineImpl::Error::INVALID_RENDER_PASS:
+		LOG_ERROR("Pipeline was given invalid render pass");
 		return Error::PIPELINE_INIT_ERROR;
 		break;
 	case GfxPipelineImpl::Error::NO_SHADERS:
@@ -288,6 +287,7 @@ RendererImpl::Error RendererImpl::set_default_texture(const Image& Image) {
 Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
 	InternalMesh digestedMesh;
 	digestedMesh.pipeline_hash = std::hash<std::string>()(Mesh.pipeline_name);
+	digestedMesh.depth_pipeline_hash = std::hash<std::string>()(Mesh.depth_pipeline_name);
 	digestedMesh.color_texture_hash = DEFAULT_TEXTURE_NAME;
 
 	if (!Mesh.texture_name.empty()) {
@@ -378,6 +378,172 @@ void RendererImpl::draw_frame() {
 	}
 }
 
+void RendererImpl::create_render_state() {
+	/*
+	* Create depth buffers
+	*/
+
+	depthbuffers.resize(render_swapchain.size());
+
+	for (auto& depthBuffer : depthbuffers) {
+		depthBuffer.texture = context->create_depth_buffer(render_swapchain.extent);
+		context->transition_image_layout(depthBuffer.texture, depthBuffer.texture.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+
+		vk::ImageViewCreateInfo viewInfo;
+		viewInfo.image = depthBuffer.texture.image;
+		viewInfo.viewType = vk::ImageViewType::e2D;
+		viewInfo.format = depthBuffer.texture.format;
+		viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+		viewInfo.subresourceRange.baseMipLevel = 0;
+		viewInfo.subresourceRange.levelCount = 1;
+		viewInfo.subresourceRange.baseArrayLayer = 0;
+		viewInfo.subresourceRange.layerCount = 1;
+
+		depthBuffer.view = context->primary_logical_device.createImageView(viewInfo);
+	}
+
+	/*
+	* Create render pass
+	*/
+
+	vk::AttachmentDescription depthAttachment;
+	depthAttachment.format = depthbuffers[0].texture.format;
+	depthAttachment.samples = vk::SampleCountFlagBits::e1;
+	depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+	depthAttachment.storeOp = vk::AttachmentStoreOp::eDontCare;
+	depthAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+	depthAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+	depthAttachment.initialLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+	depthAttachment.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+
+	vk::AttachmentDescription colorAttachment;
+	colorAttachment.format = render_swapchain.format;
+	colorAttachment.samples = vk::SampleCountFlagBits::e1;
+	colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	colorAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+	colorAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+	colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
+	colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+
+	std::vector<vk::AttachmentDescription> attachments{
+		depthAttachment,
+		colorAttachment
+	};
+
+	vk::AttachmentReference depthWriteAttachmentRef;
+	depthWriteAttachmentRef.attachment = 0;
+	depthWriteAttachmentRef.layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+
+	vk::AttachmentReference depthReadAttachmentRef;
+	depthReadAttachmentRef.attachment = 0;
+	depthReadAttachmentRef.layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
+
+	vk::AttachmentReference colorAttachmentRef;
+	colorAttachmentRef.attachment = 1;
+	colorAttachmentRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
+
+	vk::SubpassDescription depthSubpass;
+	depthSubpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
+	depthSubpass.colorAttachmentCount = 0;
+	depthSubpass.pColorAttachments = nullptr;
+	depthSubpass.pDepthStencilAttachment = &depthWriteAttachmentRef;
+
+	vk::SubpassDescription colorSubpass;
+	colorSubpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
+	colorSubpass.colorAttachmentCount = 1;
+	colorSubpass.pColorAttachments = &colorAttachmentRef;
+	colorSubpass.pDepthStencilAttachment = &depthReadAttachmentRef;
+
+	std::vector<vk::SubpassDescription> subpasses{
+		depthSubpass,
+		colorSubpass
+	};
+
+	vk::SubpassDependency depthSubpassDependency;
+	depthSubpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	depthSubpassDependency.dstSubpass = 1;
+	depthSubpassDependency.srcStageMask = vk::PipelineStageFlagBits::eLateFragmentTests;
+	depthSubpassDependency.srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+	depthSubpassDependency.dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests;
+	depthSubpassDependency.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentRead;
+
+	vk::SubpassDependency colorSubpassDependency;
+	colorSubpassDependency.srcSubpass = 0;
+	colorSubpassDependency.dstSubpass = 1;
+	colorSubpassDependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+	colorSubpassDependency.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+	colorSubpassDependency.dstStageMask = vk::PipelineStageFlagBits::eFragmentShader;
+	colorSubpassDependency.dstAccessMask = vk::AccessFlagBits::eInputAttachmentRead;
+
+	std::vector<vk::SubpassDependency> subpassDependencies{
+		depthSubpassDependency,
+		colorSubpassDependency
+	};
+
+	vk::RenderPassCreateInfo renderPassInfo;
+	renderPassInfo.attachmentCount = attachments.size();
+	renderPassInfo.pAttachments = attachments.data();
+	renderPassInfo.subpassCount = subpasses.size();
+	renderPassInfo.pSubpasses = subpasses.data();
+	renderPassInfo.dependencyCount = subpassDependencies.size();
+	renderPassInfo.pDependencies = subpassDependencies.data();
+
+	geometry_render_pass = context->primary_logical_device.createRenderPass(renderPassInfo);
+	depth_subpass = 0;
+	color_subpass = 1;
+
+	if (!geometry_render_pass) {
+		LOG_ERROR("Failed to create geometry render pass");
+		return;
+	}
+
+	/*
+	* Create framebuffers
+	*/
+
+	framebuffers.resize(render_swapchain.size());
+
+	for (size_t i = 0; i < framebuffers.size(); i++) {
+		std::vector<vk::ImageView> attachments{
+			depthbuffers[i].view,
+			render_swapchain.image_views[i]
+		};
+
+		vk::FramebufferCreateInfo framebufferInfo;
+		framebufferInfo.renderPass = geometry_render_pass;
+		framebufferInfo.attachmentCount = attachments.size();
+		framebufferInfo.pAttachments = attachments.data();
+		framebufferInfo.width = render_swapchain.extent.width;
+		framebufferInfo.height = render_swapchain.extent.height;
+		framebufferInfo.layers = 1;
+
+		vk::Framebuffer framebuffer = context->primary_logical_device.createFramebuffer(framebufferInfo);
+
+		if (!framebuffer) {
+			LOG_ERROR("Failed to create swapchain framebuffer");
+			return;
+		}
+
+		framebuffers[i] = framebuffer;
+	}
+}
+
+void RendererImpl::destroy_render_state() {
+	context->primary_logical_device.destroy(geometry_render_pass);
+
+	for (auto framebuffer : framebuffers) {
+		context->primary_logical_device.destroy(framebuffer);
+	}
+
+	framebuffers.clear();
+
+	for (auto& depthBuffer : depthbuffers) {
+		context->primary_logical_device.destroy(depthBuffer.view);
+		context->destroy_texture(depthBuffer.texture);
+	}
+}
+
 bool RendererImpl::should_render() {
 	return !context->window->is_minimized()
 		&& render_swapchain.is_initialized()
@@ -448,7 +614,7 @@ void RendererImpl::finish_mesh_digestion() {
 	for (auto& name : buffer_type_names) {
 		// Only allocate SSBOs that are per mesh
 		if (buffer_type_is_per_mesh[name]) {
-			frame_data_buffers[name].resize(render_swapchain.framebuffers.size());
+			frame_data_buffers[name].resize(render_swapchain.size());
 
 			for (auto& ssbo : frame_data_buffers[name]) {
 				ssbo = context->create_storage_buffer(buffer_type_sizes[name] * meshes.size());
@@ -456,7 +622,7 @@ void RendererImpl::finish_mesh_digestion() {
 		}
 		// Allocate UBOs that aren't per mesh
 		else {
-			frame_data_buffers[name].resize(render_swapchain.framebuffers.size());
+			frame_data_buffers[name].resize(render_swapchain.size());
 
 			for (auto& ubo : frame_data_buffers[name]) {
 				ubo = context->create_uniform_buffer(buffer_type_sizes[name]);
@@ -481,8 +647,12 @@ void RendererImpl::finish_mesh_digestion() {
 		}
 	}
 
-	numPerMeshBuffers *= render_swapchain.framebuffers.size();
-	numGlobalBuffers *= render_swapchain.framebuffers.size();
+	numPerMeshBuffers *= render_swapchain.size();
+	numGlobalBuffers *= render_swapchain.size();
+
+	numSamplers *= pipelines.size();
+	numPerMeshBuffers *= pipelines.size();
+	numGlobalBuffers *= pipelines.size();
 
 	std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
 		{ vk::DescriptorType::eStorageBuffer, numPerMeshBuffers },
@@ -506,7 +676,7 @@ void RendererImpl::finish_mesh_digestion() {
 
 	// Allocate buffer descriptor sets
 	for (auto& pipeline : pipelines) {
-		std::vector<vk::DescriptorSetLayout> bufferLayouts(render_swapchain.framebuffers.size(), pipeline.second.buffer_descriptor_set_layout);
+		std::vector<vk::DescriptorSetLayout> bufferLayouts(render_swapchain.size(), pipeline.second.buffer_descriptor_set_layout);
 
 		vk::DescriptorSetAllocateInfo bufferDescriptorSetInfo;
 		bufferDescriptorSetInfo.descriptorPool = descriptor_pool;
@@ -544,7 +714,7 @@ void RendererImpl::finish_mesh_digestion() {
 
 			if (pipeline.second.descriptor_is_buffer[descriptorName]) {
 				// Per frame state
-				for (size_t i = 0; i < render_swapchain.framebuffers.size(); i++) {
+				for (size_t i = 0; i < render_swapchain.size(); i++) {
 					vk::WriteDescriptorSet descriptorWrite;
 
 					// buffer_descriptor_sets[Pipeline Name][Swapchain Image #]
@@ -619,19 +789,76 @@ void RendererImpl::record_command_buffers() {
 		currentCommandBuffer.begin(beginInfo);
 
 		vk::RenderPassBeginInfo renderPassInfo;
-		renderPassInfo.renderPass = render_swapchain.render_pass;
-		renderPassInfo.framebuffer = render_swapchain.framebuffers[i];
+		renderPassInfo.renderPass = geometry_render_pass;
+		renderPassInfo.framebuffer = framebuffers[i];
 		renderPassInfo.renderArea.offset = vk::Offset2D{ 0,0 };
 		renderPassInfo.renderArea.extent = render_swapchain.extent;
 
-		vk::ClearValue clearColor;
-		clearColor.color.float32 = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+		vk::ClearValue depthClear;
+		depthClear.color.float32 = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+		depthClear.depthStencil.depth = 1.0f;
+		depthClear.depthStencil.stencil = 0.0f;
 
-		renderPassInfo.clearValueCount = 1;
-		renderPassInfo.pClearValues = &clearColor;
+		vk::ClearValue colorClear;
+		colorClear.color.float32 = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+
+		std::vector<vk::ClearValue> clearValues{
+			depthClear,
+			colorClear
+		};
+
+		renderPassInfo.clearValueCount = clearValues.size();
+		renderPassInfo.pClearValues = clearValues.data();
 
 		currentCommandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
+		// Depth only subpass
+		for (MeshId meshId = 0; meshId < meshes.size(); meshId++) {
+			GfxPipelineImpl* pipeline = &pipelines[meshes[meshId].depth_pipeline_hash];
+
+			currentCommandBuffer.bindPipeline(
+				vk::PipelineBindPoint::eGraphics,
+				pipeline->pipeline
+			);
+
+			std::vector<vk::DescriptorSet> descriptorSets = { buffer_descriptor_sets[meshes[meshId].pipeline_hash][i] };
+			
+			currentCommandBuffer.bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
+				pipeline->pipeline_layout,
+				0,
+				descriptorSets,
+				nullptr
+			);
+
+			currentCommandBuffer.pushConstants<MeshId>(
+				pipeline->pipeline_layout,
+				pipeline->mesh_id_push_constant.stageFlags,
+				pipeline->mesh_id_push_constant.offset,
+				meshId
+				);
+
+			std::array<vk::Buffer, 1> vertexBuffers = { meshes[meshId].vertex_buffer.buffer };
+			std::array<vk::DeviceSize, 1> offsets = { 0 };
+			currentCommandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
+			currentCommandBuffer.bindIndexBuffer(
+				meshes[meshId].index_buffer.buffer,
+				0,
+				vk::IndexType::eUint32
+			);
+
+			currentCommandBuffer.drawIndexed(
+				static_cast<uint32_t>(meshes[meshId].index_count),
+				1,
+				0,
+				0,
+				0
+			);
+		}
+
+		currentCommandBuffer.nextSubpass(vk::SubpassContents::eInline);
+
+		// Color subpass
 		for (MeshId meshId = 0; meshId < meshes.size(); meshId++) {
 			GfxPipelineImpl* pipeline = &pipelines[meshes[meshId].pipeline_hash];
 
@@ -713,6 +940,9 @@ void RendererImpl::window_restored_callback() {
 	context->primary_logical_device.waitIdle();
 
 	render_swapchain.reinit();
+
+	destroy_render_state();
+	create_render_state();
 
 	for (auto& pipeline : pipelines) {
 		pipeline.second.reinit();

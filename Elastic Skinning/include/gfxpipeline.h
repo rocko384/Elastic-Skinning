@@ -17,8 +17,7 @@ struct GfxPipelineImpl {
 		OK,
 		INVALID_CONTEXT,
 		UNINITIALIZED_CONTEXT,
-		INVALID_SWAPCHAIN,
-		UNINITIALIZED_SWAPCHAIN,
+		INVALID_RENDER_PASS,
 		NO_SHADERS,
 		FAIL_CREATE_DESCRIPTOR_SET_LAYOUT,
 		FAIL_CREATE_PIPELINE_LAYOUT,
@@ -36,14 +35,13 @@ struct GfxPipelineImpl {
 	GfxPipelineImpl& set_tessellation_eval_shader(std::filesystem::path path);
 	GfxPipelineImpl& set_geometry_shader(std::filesystem::path path);
 	GfxPipelineImpl& set_fragment_shader(std::filesystem::path path);
-	GfxPipelineImpl& set_target(/* RenderTarget Target */); // TODO: Implement other possible render targets
+	GfxPipelineImpl& set_target(RenderTarget Target);
 
-	Error init(GfxContext* Context, Swapchain* Swapchain);
+	Error init(GfxContext* Context, vk::Extent2D* Viewport, vk::RenderPass* RenderPass, uint32_t Subpass);
 	Error reinit();
 	void deinit();
 
 	bool is_initialized() { return is_init; }
-	bool is_swapchain_dependent() { return should_init_with_swapchain; };
 
 	vk::DescriptorSetLayout buffer_descriptor_set_layout;
 	vk::DescriptorSetLayout texture_descriptor_set_layout;
@@ -56,13 +54,17 @@ struct GfxPipelineImpl {
 	std::unordered_map<StringHash, bool> descriptor_is_buffer;
 	std::unordered_map<StringHash, vk::DescriptorSetLayoutBinding> descriptor_layout_bindings;
 
+	RenderTarget target{ RenderTarget::Swapchain };
+
 protected:
 
 	bool is_init{ false };
-	bool should_init_with_swapchain{ true };
 
 	GfxContext* context{ nullptr };
 	Swapchain* swapchain{ nullptr };
+	vk::Extent2D* viewport_size;
+	vk::RenderPass* render_pass;
+	uint32_t subpass;
 
 	vk::VertexInputBindingDescription vertex_binding_description;
 	std::vector<vk::VertexInputAttributeDescription> vertex_attribute_descriptions;
