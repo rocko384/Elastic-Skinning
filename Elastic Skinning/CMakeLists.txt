@@ -24,7 +24,7 @@ set(SOURCE
 	"source/mesh.cpp"
 	"source/deps_impl.cpp"
 	"include/renderingtypes.h"
-)
+ "include/crc.h")
 
 file(GLOB
 	SHADERS

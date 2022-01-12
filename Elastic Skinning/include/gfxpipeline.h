@@ -54,6 +54,12 @@ struct GfxPipelineImpl {
 	std::unordered_map<StringHash, bool> descriptor_is_buffer;
 	std::unordered_map<StringHash, vk::DescriptorSetLayoutBinding> descriptor_layout_bindings;
 
+	std::filesystem::path vertex_shader_path;
+	std::filesystem::path tessellation_control_shader_path;
+	std::filesystem::path tessellation_eval_shader_path;
+	std::filesystem::path geometry_shader_path;
+	std::filesystem::path fragment_shader_path;
+
 	RenderTarget target{ RenderTarget::Swapchain };
 
 protected:
@@ -69,18 +75,13 @@ protected:
 	vk::VertexInputBindingDescription vertex_binding_description;
 	std::vector<vk::VertexInputAttributeDescription> vertex_attribute_descriptions;
 
-	std::filesystem::path vertex_shader_path;
-	std::filesystem::path tessellation_control_shader_path;
-	std::filesystem::path tessellation_eval_shader_path;
-	std::filesystem::path geometry_shader_path;
-	std::filesystem::path fragment_shader_path;
 };
 
 
-template <VertexType Vtx, DescriptorType... Descriptors>
-struct GfxPipeline : public GfxPipelineImpl {
+template <VertexType Vtx, bool EnableSamplers, DescriptorType... Descriptors>
+struct GfxPipelineBuilder : public GfxPipelineImpl {
 
-	GfxPipeline() {
+	GfxPipelineBuilder() {
 		vertex_binding_description = Vtx::binding_description();
 
 		vertex_attribute_descriptions.resize(Vtx::attribute_description().size());
@@ -93,11 +94,24 @@ struct GfxPipeline : public GfxPipelineImpl {
 		std::vector<vk::DescriptorSetLayoutBinding> bindings = { (Descriptors::layout_binding())... };
 
 		for (size_t i = 0; i < names.size(); i++) {
-			descriptor_is_buffer[names[i]] = isBuffer[i];
-			descriptor_layout_bindings[names[i]] = bindings[i];
+			if (!EnableSamplers && !isBuffer[i]) {
+				names[i] = 0;
+			}
+			else {
+				descriptor_is_buffer[names[i]] = isBuffer[i];
+				descriptor_layout_bindings[names[i]] = bindings[i];
+			}
 		}
+
+		std::erase(names, StringHash{ 0 });
 
 		descriptor_type_names = names;
 	}
+};
+
+template <VertexType Vtx, DescriptorType... Descriptors>
+struct GfxPipeline : public GfxPipelineBuilder<Vtx, true, Descriptors...> {
+
+	using DepthPipelineType = GfxPipelineBuilder<Vtx, false, Descriptors...>;
 
 };

@@ -1,11 +1,15 @@
 ﻿#pragma once
 
+#include "crc.h"
+
 #include <initializer_list>
+#include <string_view>
 #include <span>
 #include <concepts>
 #include <type_traits>
 #include <utility>
 #include <cstdio>
+#include <cstdint>
 
 template <typename VALUE_TYPE, typename STATUS_TYPE>
 struct Retval {
@@ -13,11 +17,11 @@ struct Retval {
 	STATUS_TYPE status;
 };
 
-using StringHash = size_t;
+using StringHash = uint64_t;
 
-inline size_t hash_combine(std::initializer_list<size_t> hashes) {
+inline constexpr uint64_t hash_combine(std::initializer_list<uint64_t> hashes) {
 	std::span data{ hashes };
-	size_t ret = 0;
+	uint64_t ret = 0;
 
 	for (size_t i = 0; i < data.size(); i++) {
 		ret ^= data[i] + 0x9e3779b9 + (ret << 6) + (ret >> 2);

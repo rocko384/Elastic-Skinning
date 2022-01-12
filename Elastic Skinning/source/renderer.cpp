@@ -146,11 +146,11 @@ void RendererImpl::deinit() {
 	is_init = false;
 }
 
-RendererImpl::Error RendererImpl::register_pipeline(const std::string& Name, GfxPipelineImpl& Pipeline) {
-	return register_pipeline(std::hash<std::string>()(Name), Pipeline);
+RendererImpl::Error RendererImpl::register_pipeline_impl(const std::string& Name, GfxPipelineImpl& Pipeline) {
+	return register_pipeline_impl(CRC::crc64(Name), Pipeline);
 }
 
-RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipelineImpl& Pipeline) {
+RendererImpl::Error RendererImpl::register_pipeline_impl(StringHash Name, GfxPipelineImpl& Pipeline) {
 	if (pipelines.contains(Name)) {
 		return Error::PIPELINE_WITH_NAME_ALREADY_EXISTS;
 	}
@@ -208,7 +208,7 @@ RendererImpl::Error RendererImpl::register_pipeline(StringHash Name, GfxPipeline
 }
 
 RendererImpl::Error RendererImpl::register_texture(const std::string& Name, const Image& Image) {
-	return register_texture(std::hash<std::string>()(Name), Image);
+	return register_texture(CRC::crc64(Name), Image);
 }
 
 RendererImpl::Error RendererImpl::register_texture(StringHash Name, const Image& Image) {
@@ -251,12 +251,12 @@ RendererImpl::Error RendererImpl::set_default_texture(const Image& Image) {
 
 Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
 	InternalMesh digestedMesh;
-	digestedMesh.pipeline_hash = std::hash<std::string>()(Mesh.pipeline_name);
-	digestedMesh.depth_pipeline_hash = std::hash<std::string>()(Mesh.depth_pipeline_name);
+	digestedMesh.pipeline_hash = CRC::crc64(Mesh.pipeline_name);
+	digestedMesh.depth_pipeline_hash = hash_combine({ digestedMesh.pipeline_hash, RendererImpl::DEPTH_PIPELINE_NAME });
 	digestedMesh.color_texture_hash = DEFAULT_TEXTURE_NAME;
 
 	if (!Mesh.texture_name.empty()) {
-		digestedMesh.color_texture_hash = std::hash<std::string>()(Mesh.texture_name);
+		digestedMesh.color_texture_hash = CRC::crc64(Mesh.texture_name);
 	}
 
 	digestedMesh.vertex_count = Mesh.vertices.size();

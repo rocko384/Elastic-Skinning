@@ -44,7 +44,6 @@ int main(int argc, char** argv) {
 	ModelTransform t1;
 	t1.position.x = -0.5;
 	triangle.pipeline_name = "base";
-	triangle.depth_pipeline_name = "base_depth";
 	triangle.vertices = {
 		{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
 		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -58,7 +57,6 @@ int main(int argc, char** argv) {
 	ModelTransform t2;
 	t2.position.x = 0.5;
 	triangle2.pipeline_name = "base";
-	triangle2.depth_pipeline_name = "base_depth";
 	triangle2.vertices = {
 		{{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
 		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -70,9 +68,8 @@ int main(int argc, char** argv) {
 
 	Mesh square;
 	ModelTransform s1;
-	s1.position.z = 0.1f;
+	s1.position.z = -0.1f;
 	square.pipeline_name = "base";
-	square.depth_pipeline_name = "base_depth";
 	square.texture_name = "colortest";
 	square.vertices = {
 		{{-0.25f, 0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
@@ -87,7 +84,6 @@ int main(int argc, char** argv) {
 	Mesh x_note;
 	ModelTransform x;
 	x_note.pipeline_name = "base";
-	x_note.depth_pipeline_name = "base_depth";
 	x_note.vertices = {
 		{{-0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}},
 		{{0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}},
@@ -102,7 +98,6 @@ int main(int argc, char** argv) {
 	Mesh y_note;
 	ModelTransform y;
 	y_note.pipeline_name = "base";
-	y_note.depth_pipeline_name = "base_depth";
 	y_note.vertices = {
 		{{-0.125f, 0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}},
 		{{0.125f, 0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}},
@@ -117,7 +112,6 @@ int main(int argc, char** argv) {
 	Mesh z_note;
 	ModelTransform z;
 	z_note.pipeline_name = "base";
-	z_note.depth_pipeline_name = "base_depth";
 	z_note.vertices = {
 		{{-0.125f, 0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}},
 		{{0.125f, 0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}},
@@ -158,12 +152,13 @@ int main(int argc, char** argv) {
 		std::chrono::milliseconds t = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time);
 
 		float sin_t = glm::sin(static_cast<float>(t.count()) / 200.f);
+		float sin_15t_5 = glm::sin(1.5f * static_cast<float>(t.count() + 0.5f) / 200.f);
 		float rocker_t = glm::pow(glm::abs(sin_t) + 1.0f, 2.0f) / 2.0f;
 
 		s1.position.x = sin_t;
 		s1.scale = { rocker_t, rocker_t, rocker_t };
 		t1.position.y = sin_t;
-		t2.position.y = -sin_t;
+		t2.position.y = -sin_15t_5;
 
 		renderer.draw_frame();
 	}

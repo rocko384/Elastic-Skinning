@@ -1,5 +1,7 @@
 #pragma once
 
+#include "crc.h"
+
 #include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -89,15 +91,11 @@ concept DescriptorType =
 struct ModelBuffer {
 	glm::mat4 model;
 
-	static StringHash name() {
-		return std::hash<std::string>()("Model");
+	static constexpr StringHash name() {
+		return CRC::crc64("Model");
 	}
 
-	static bool is_per_mesh() {
-		return true;
-	}
-
-	static vk::DescriptorSetLayoutBinding layout_binding() {
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
 
 		retval.binding = 0;
@@ -107,6 +105,10 @@ struct ModelBuffer {
 		retval.pImmutableSamplers = nullptr;
 
 		return retval;
+	}
+
+	static constexpr bool is_per_mesh() {
+		return layout_binding().descriptorType == vk::DescriptorType::eStorageBuffer;
 	}
 };
 
@@ -129,15 +131,11 @@ struct CameraBuffer {
 	glm::mat4 view;
 	glm::mat4 projection;
 
-	static StringHash name() {
-		return std::hash<std::string>()("Camera");
+	static constexpr StringHash name() {
+		return CRC::crc64("Camera");
 	}
 
-	static bool is_per_mesh() {
-		return false;
-	}
-
-	static vk::DescriptorSetLayoutBinding layout_binding() {
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
 
 		retval.binding = 1;
@@ -148,14 +146,18 @@ struct CameraBuffer {
 
 		return retval;
 	}
+
+	static constexpr bool is_per_mesh() {
+		return layout_binding().descriptorType == vk::DescriptorType::eStorageBuffer;
+	}
 };
 
 struct ColorSampler {
-	static StringHash name() {
-		return std::hash<std::string>()("Color");
+	static constexpr StringHash name() {
+		return CRC::crc64("Color");
 	}
 
-	static vk::DescriptorSetLayoutBinding layout_binding() {
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
 
 		retval.binding = 0;

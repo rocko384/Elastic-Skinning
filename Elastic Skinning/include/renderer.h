@@ -17,7 +17,10 @@
 
 class RendererImpl {
 
+protected:
+
 	static const StringHash DEFAULT_TEXTURE_NAME = 1;
+	static const StringHash DEPTH_PIPELINE_NAME = 42;
 
 public:
 
@@ -40,8 +43,8 @@ public:
 
 	bool is_initialized() { return is_init; }
 
-	Error register_pipeline(const std::string& Name, GfxPipelineImpl& Pipeline);
-	Error register_pipeline(StringHash Name, GfxPipelineImpl& Pipeline);
+	Error register_pipeline_impl(const std::string& Name, GfxPipelineImpl& Pipeline);
+	Error register_pipeline_impl(StringHash Name, GfxPipelineImpl& Pipeline);
 
 	Error register_texture(const std::string& Name, const Image& Image);
 	Error register_texture(StringHash Name, const Image& Imaage);
@@ -169,6 +172,26 @@ public:
 
 		buffer_type_names = bufferNames;
 		sampler_type_names = samplerNames;
+	}
+
+	template <VertexType Vertex, DescriptorType... Descriptors>
+	Error register_pipeline(const std::string& Name, GfxPipeline<Vertex, Descriptors...>& Pipeline) {
+		return register_pipeline(CRC::crc64(Name), Pipeline);
+	}
+
+	template <VertexType Vertex, DescriptorType... Descriptors>
+	Error register_pipeline(StringHash Name, GfxPipeline<Vertex, Descriptors...>& Pipeline) {
+		typename GfxPipeline<Vertex, Descriptors...>::DepthPipelineType depthPipeline;
+		depthPipeline.vertex_shader_path = Pipeline.vertex_shader_path;
+		depthPipeline.target = RenderTarget::DepthBuffer;
+
+		Error ret = register_pipeline_impl(Name, Pipeline);
+		
+		if (ret != Error::OK) {
+			return ret;
+		}
+
+		return register_pipeline_impl(hash_combine({ Name, RendererImpl::DEPTH_PIPELINE_NAME }), depthPipeline);
 	}
 
 private:
