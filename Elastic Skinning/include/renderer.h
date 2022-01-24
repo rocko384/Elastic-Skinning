@@ -36,10 +36,8 @@ public:
 
 	using MeshId = uint32_t;
 
+	RendererImpl(GfxContext* Context);
 	~RendererImpl();
-
-	void init(GfxContext* Context);
-	void deinit();
 
 	bool is_initialized() { return is_init; }
 
@@ -57,6 +55,10 @@ public:
 	void draw_frame();
 
 protected:
+
+	RendererImpl() = default;
+
+	void constructor_impl(GfxContext* Context);
 
 	void create_render_state();
 	void destroy_render_state();
@@ -142,7 +144,7 @@ class Renderer : public RendererImpl {
 	
 public:
 
-	Renderer() {
+	Renderer(GfxContext* Context) {
 
 		std::vector<StringHash> names = { (SupportedDescriptors::name())... };
 		std::vector<bool> isBuffer = { (BufferObjectType<SupportedDescriptors>)... };
@@ -172,6 +174,8 @@ public:
 
 		buffer_type_names = bufferNames;
 		sampler_type_names = samplerNames;
+
+		constructor_impl(Context);
 	}
 
 	template <VertexType Vertex, DescriptorType... Descriptors>

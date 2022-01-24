@@ -4,11 +4,11 @@
 #include <list>
 #include <memory>
 
-RendererImpl::~RendererImpl() {
-	deinit();
+RendererImpl::RendererImpl(GfxContext* Context) {
+	constructor_impl(Context);
 }
 
-void RendererImpl::init(GfxContext* Context) {
+void RendererImpl::constructor_impl(GfxContext* Context) {
 	if (Context == nullptr) {
 		LOG_ERROR("Graphics context doesn't exist");
 		return;
@@ -110,7 +110,7 @@ void RendererImpl::init(GfxContext* Context) {
 	is_init = true;
 }
 
-void RendererImpl::deinit() {
+RendererImpl::~RendererImpl() {
 	if (is_initialized()) {
 		context->primary_logical_device.waitIdle();
 

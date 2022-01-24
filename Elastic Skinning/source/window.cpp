@@ -2,11 +2,7 @@
 
 #include <algorithm>
 
-Window::~Window() {
-
-}
-
-void Window::init(const std::string& Title, bool Resizeable) {
+Window::Window(const std::string& Title, bool Resizeable) {
 
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
 		LOG_ERROR("SDL failed to init");
@@ -40,7 +36,7 @@ void Window::init(const std::string& Title, bool Resizeable) {
 	is_init = true;
 }
 
-void Window::deinit() {
+Window::~Window() {
 	if (is_initialized()) {
 		SDL_DestroyWindow(window);
 		SDL_Quit();

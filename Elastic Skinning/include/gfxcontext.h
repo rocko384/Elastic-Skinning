@@ -47,10 +47,9 @@ class GfxContext {
 
 public:
 
-	~GfxContext();
 
-	void init(Window* Window, const std::string& AppName = "", const std::string& EngineName = "No Engine");
-	void deinit();
+	GfxContext(Window* Window, const std::string& AppName = "", const std::string& EngineName = "No Engine");
+	~GfxContext();
 
 	bool is_initialized() { return is_init; }
 

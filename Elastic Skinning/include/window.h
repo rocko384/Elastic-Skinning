@@ -25,10 +25,9 @@ public:
 
 public:
 
+	Window(const std::string& Title, bool Resizeable = false);
 	~Window();
 
-	void init(const std::string& Title, bool Resizeable = false);
-	void deinit();
 	bool is_initialized() { return is_init; }
 	bool should_close() { return saw_close_event; }
 	bool is_minimized() { return is_minimized_; };

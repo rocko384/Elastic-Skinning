@@ -73,11 +73,7 @@ int scoreDevice(vk::PhysicalDevice device, vk::SurfaceKHR surface) {
 	return result;
 }
 
-GfxContext::~GfxContext() {
-	deinit();
-}
-
-void GfxContext::init(Window* Window, const std::string& AppName, const std::string& EngineName) {
+GfxContext::GfxContext(Window* Window, const std::string& AppName, const std::string& EngineName) {
 	
 	if (Window == nullptr) {
 		LOG_ERROR("Window does not exist");
@@ -403,7 +399,7 @@ void GfxContext::init(Window* Window, const std::string& AppName, const std::str
 	is_init = true;
 }
 
-void GfxContext::deinit() {
+GfxContext::~GfxContext() {
 	if (is_initialized()) {
 
 		primary_logical_device.destroy(memory_transfer_command_pool);

@@ -12,14 +12,10 @@
 const std::string APP_NAME{ "Elastic Skinning" };
 
 int main(int argc, char** argv) {
-	Window window;
-	window.init(APP_NAME, true);
+	Window window(APP_NAME, true);
+	GfxContext context(&window, APP_NAME);
 
-	GfxContext context;
-	context.init(&window, APP_NAME);
-
-	Renderer<ModelBuffer, CameraBuffer, ColorSampler> renderer;
-	renderer.init(&context);
+	Renderer<ModelBuffer, CameraBuffer, ColorSampler> renderer(&context);
 
 	GfxPipeline<Vertex, ModelBuffer, CameraBuffer> base_depth_pipeline;
 	base_depth_pipeline
@@ -162,11 +158,6 @@ int main(int argc, char** argv) {
 
 		renderer.draw_frame();
 	}
-
-
-	renderer.deinit();
-	context.deinit();
-	window.deinit();
 
 	return 0;
 }
