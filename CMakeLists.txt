@@ -18,6 +18,10 @@ find_package(Vulkan REQUIRED FATAL_ERROR)
 add_subdirectory("Dependencies/glm")
 add_subdirectory("Dependencies/SDL")
 
+set(TINYGLTF_HEADER_ONLY "True")
+
+add_subdirectory("Dependencies/tinygltf")
+
 set (VMA_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/Dependencies/VulkanMemoryAllocator/include")
 set (STB_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/Dependencies/stb")
 

@@ -7,6 +7,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <array>
+#include <optional>
 #include <functional>
 #include <concepts>
 #include <type_traits>
@@ -34,6 +35,7 @@ concept VertexType =
 
 struct Vertex {
 	glm::vec3 position;
+	glm::vec3 normal;
 	glm::vec3 color;
 	glm::vec2 texcoords;
 
@@ -47,8 +49,8 @@ struct Vertex {
 		return retval;
 	}
 
-	static std::array<vk::VertexInputAttributeDescription, 3> attribute_description() {
-		std::array<vk::VertexInputAttributeDescription, 3> retval;
+	static std::array<vk::VertexInputAttributeDescription, 4> attribute_description() {
+		std::array<vk::VertexInputAttributeDescription, 4> retval;
 
 		retval[0].binding = 0;
 		retval[0].location = 0;
@@ -58,15 +60,68 @@ struct Vertex {
 		retval[1].binding = 0;
 		retval[1].location = 1;
 		retval[1].format = vk::Format::eR32G32B32Sfloat;
-		retval[1].offset = offsetof(Vertex, color);
+		retval[1].offset = offsetof(Vertex, normal);
 
 		retval[2].binding = 0;
 		retval[2].location = 2;
-		retval[2].format = vk::Format::eR32G32Sfloat;
-		retval[2].offset = offsetof(Vertex, texcoords);
+		retval[2].format = vk::Format::eR32G32B32Sfloat;
+		retval[2].offset = offsetof(Vertex, color);
+
+		retval[3].binding = 0;
+		retval[3].location = 3;
+		retval[3].format = vk::Format::eR32G32Sfloat;
+		retval[3].offset = offsetof(Vertex, texcoords);
 
 		return retval;
 	}
+};
+
+struct Image {
+	BinaryBlob data;
+	size_t width;
+	size_t height;
+	size_t channel_count;
+};
+
+struct Sampler {
+	enum class Filter {
+		Nearest,
+		Linear,
+		NearestMipmapNearest,
+		LinearMipmapNearest,
+		NearestMipmapLinear,
+		LinearMipmapLinear
+	};
+
+	enum class Wrap {
+		Repeat,
+		ClampToEdge,
+		MirroredRepeat
+	};
+
+	Filter mag_filter{ Filter::Nearest };
+	Filter min_filter{ Filter::Nearest };
+	Wrap wrap_u{ Wrap::Repeat };
+	Wrap wrap_v{ Wrap::Repeat };
+};
+
+struct Texture {
+	Image image;
+	Sampler sampler;
+};
+
+struct Material {
+	std::optional<Texture> albedo;
+	std::optional<Texture> normal;
+	std::optional<Texture> metallic_roughness;
+
+	std::string name;
+
+	std::string pipeline_name;
+
+	glm::vec4 albedo_factor{ 1.0f, 1.0f, 1.0f, 1.0f };
+	float metallic_factor{ 0.0f };
+	float roughness_factor{ 0.0f };
 };
 
 template <typename T>

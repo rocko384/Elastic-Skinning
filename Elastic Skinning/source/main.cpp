@@ -14,107 +14,120 @@ const std::string APP_NAME{ "Elastic Skinning" };
 int main(int argc, char** argv) {
 	Window window(APP_NAME, true);
 	GfxContext context(&window, APP_NAME);
-
 	Renderer<ModelBuffer, CameraBuffer, ColorSampler> renderer(&context);
-
-	GfxPipeline<Vertex, ModelBuffer, CameraBuffer> base_depth_pipeline;
-	base_depth_pipeline
-		.set_vertex_shader("shaders/base.vert.bin")
-		.set_target(RenderTarget::DepthBuffer);
 
 	GfxPipeline<Vertex, ModelBuffer, CameraBuffer, ColorSampler> base_pipeline;
 	base_pipeline
 		.set_vertex_shader("shaders/base.vert.bin")
 		.set_fragment_shader("shaders/base.frag.bin");
 
-	renderer.register_pipeline("base_depth", base_depth_pipeline);
 	renderer.register_pipeline("base", base_pipeline);
 
 	Retval<Image, AssetError> defaulttex = load_image("textures/default.png");
 	Retval<Image, AssetError> colortest = load_image("textures/colortest.png");
 
+	Material defaultmaterial{
+		std::nullopt,
+		std::nullopt,
+		std::nullopt,
+		"DefaultMaterial",
+		"base",
+		{1.0f, 1.0f, 1.0f, 1.0f},
+		0.0f,
+		0.0f
+	};
+
+	Material colortestmaterial{
+		std::optional<Texture>({colortest.value, Sampler{}}),
+		std::nullopt,
+		std::nullopt,
+		"ColorTestMaterial",
+		"base",
+		{1.0f, 1.0f, 1.0f, 1.0f},
+		0.0f,
+		0.0f
+	};
+
 	renderer.set_default_texture(defaulttex.value);
-	renderer.register_texture("colortest", colortest.value);
+
+	renderer.register_material(colortestmaterial);
+	renderer.set_default_material(defaultmaterial);
+
+	Retval<Model, AssetError> model = load_model("models/plaidtube.glb");
 
 	Mesh triangle;
 	ModelTransform t1;
 	t1.position.x = -0.5;
-	triangle.pipeline_name = "base";
-	triangle.vertices = {
-		{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}
+	triangle.vertices = std::vector<Vertex>{
+		{{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}
 	};
-	triangle.indices = {
+	triangle.indices = std::vector<uint32_t>{
 		0, 1, 2
 	};
 
 	Mesh triangle2;
 	ModelTransform t2;
 	t2.position.x = 0.5;
-	triangle2.pipeline_name = "base";
-	triangle2.vertices = {
-		{{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}
+	triangle2.vertices = std::vector<Vertex>{
+		{{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+		{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}
 	};
-	triangle2.indices = {
+	triangle2.indices = std::vector<uint32_t>{
 		0, 1, 2
 	};
 
 	Mesh square;
 	ModelTransform s1;
 	s1.position.z = -0.1f;
-	square.pipeline_name = "base";
-	square.texture_name = "colortest";
-	square.vertices = {
-		{{-0.25f, 0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-		{{0.25f, 0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-		{{0.25f, -0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-		{{-0.25f, -0.25f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+	square.material_name = "ColorTestMaterial";
+	square.vertices = std::vector<Vertex>{
+		{{-0.25f, 0.25f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.25f, 0.25f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+		{{0.25f, -0.25f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+		{{-0.25f, -0.25f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
 	};
-	square.indices = {
+	square.indices = std::vector<uint32_t>{
 		0, 1, 2, 2, 3, 0
 	};
 
 	Mesh x_note;
 	ModelTransform x;
-	x_note.pipeline_name = "base";
-	x_note.vertices = {
-		{{-0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-		{{0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-		{{0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-		{{-0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 1.0f}}
+	x_note.vertices = std::vector<Vertex>{
+		{{-0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+		{{-0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}}
 	};
-	x_note.indices = {
+	x_note.indices = std::vector<uint32_t>{
 		0, 1, 2, 2, 3, 0
 	};
 	x.position = { 1.0f, 0.0f, 0.0f };
 
 	Mesh y_note;
 	ModelTransform y;
-	y_note.pipeline_name = "base";
-	y_note.vertices = {
-		{{-0.125f, 0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{0.125f, 0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{0.125f, -0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{-0.125f, -0.125f, 0.0f}, {0.0f, 1.0f, 0.0f}}
+	y_note.vertices = std::vector<Vertex>{
+		{{-0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+		{{0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+		{{0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+		{{-0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}}
 	};
-	y_note.indices = {
+	y_note.indices = std::vector<uint32_t>{
 		0, 1, 2, 2, 3, 0
 	};
 	y.position = { 0.0f, 1.0f, 0.0f };
 
 	Mesh z_note;
 	ModelTransform z;
-	z_note.pipeline_name = "base";
-	z_note.vertices = {
-		{{-0.125f, 0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		{{0.125f, 0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		{{0.125f, -0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		{{-0.125f, -0.125f, 0.0f}, {1.0f, 0.0f, 0.0f}}
+	z_note.vertices = std::vector<Vertex>{
+		{{-0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+		{{0.125f, 0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+		{{0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+		{{-0.125f, -0.125f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}}
 	};
-	z_note.indices = {
+	z_note.indices = std::vector<uint32_t>{
 		0, 1, 2, 2, 3, 0
 	};
 	z.position = { 0.0f, 0.0f, 1.0f };

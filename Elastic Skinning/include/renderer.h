@@ -20,7 +20,11 @@ class RendererImpl {
 protected:
 
 	static const StringHash DEFAULT_TEXTURE_NAME = 1;
+	static const StringHash DEFAULT_MATERIAL_NAME = 1337;
 	static const StringHash DEPTH_PIPELINE_NAME = 42;
+	static const StringHash ALBEDO_TEXTURE_NAME = 51;
+	static const StringHash NORMAL_TEXTURE_NAME = 67;
+	static const StringHash METALROUGH_TEXTURE_NAME = 103;
 
 public:
 
@@ -29,9 +33,11 @@ public:
 		PIPELINE_WITH_NAME_ALREADY_EXISTS,
 		PIPELINE_HAS_UNSUPPORTED_RENDER_TARGET,
 		PIPELINE_INIT_ERROR,
+		MATERIAL_WITH_NAME_ALREADY_EXISTS,
 		FAILED_TO_ALLOCATE_BUFFER,
 		FAILED_TO_ALLOCATE_COMMAND_BUFFERS,
-		TEXTURE_WITH_NAME_ALREADY_EXISTS
+		TEXTURE_WITH_NAME_ALREADY_EXISTS,
+		MATERIAL_NOT_FOUND
 	};
 
 	using MeshId = uint32_t;
@@ -44,8 +50,12 @@ public:
 	Error register_pipeline_impl(const std::string& Name, GfxPipelineImpl& Pipeline);
 	Error register_pipeline_impl(StringHash Name, GfxPipelineImpl& Pipeline);
 
+	Error register_material(const Material& Material);
+	Error register_material(StringHash Name, const Material& Material);
+	Error set_default_material(const Material& Material);
+
 	Error register_texture(const std::string& Name, const Image& Image);
-	Error register_texture(StringHash Name, const Image& Imaage);
+	Error register_texture(StringHash Name, const Image& Image);
 	Error set_default_texture(const Image& Image);
 
 	Retval<MeshId, Error> digest_mesh(Mesh Mesh, ModelTransform* Transform);
@@ -86,23 +96,33 @@ protected:
 		vk::ImageView view;
 	};
 
+	struct InternalMaterial {
+		StringHash albedo_texture_name{ DEFAULT_TEXTURE_NAME };
+		StringHash normal_texture_name;
+		StringHash metallic_roughness_texture_name;
+
+		StringHash pipeline_name;
+
+		glm::vec4 albedo_factor;
+		float metallic_factor;
+		float roughness_factor;
+	};
+
 	GfxContext* context{ nullptr };
 	Swapchain render_swapchain;
-	std::vector<InternalTexture> depthbuffers;
 
 	vk::RenderPass geometry_render_pass;
 	uint32_t depth_subpass;
 	uint32_t color_subpass;
 
-	std::vector<vk::Framebuffer> framebuffers;
-
 	std::unordered_map<StringHash, GfxPipelineImpl> pipelines;
+
+	std::unordered_map<StringHash, InternalMaterial> materials;
 
 	std::unordered_map<StringHash, InternalTexture> textures;
 
 	vk::DescriptorPool descriptor_pool;
-	// buffer_descriptor_sets[Pipeline Name][Swapchain Image #]
-	std::unordered_map<StringHash, std::vector<vk::DescriptorSet>> buffer_descriptor_sets;
+
 	// texture_descriptor_sets[hash_combine(Pipeline Name, Sampler Name, Texture Name)]
 	// a la: texture_descriptor_sets[Pipeline Name][Sampler Name][Texture Name]
 	std::unordered_map<StringHash, vk::DescriptorSet> texture_descriptor_sets;
@@ -111,8 +131,20 @@ protected:
 	std::vector<StringHash> sampler_type_names;
 	std::unordered_map<StringHash, size_t> buffer_type_sizes;
 	std::unordered_map<StringHash, bool> buffer_type_is_per_mesh;
-	// frame_data_buffers[Buffer Type][Swapchain Image #]
-	std::unordered_map<StringHash, std::vector<BufferAllocation>> frame_data_buffers;
+
+	struct FrameData {
+		// buffer_descriptor_sets[Pipeline Name]
+		std::unordered_map<StringHash, vk::DescriptorSet> buffer_descriptor_sets;
+
+		// frame_data_buffers[Buffer Type]
+		std::unordered_map<StringHash, BufferAllocation> data_buffers;
+
+		InternalTexture depthbuffer;
+
+		vk::Framebuffer framebuffer;
+	};
+
+	std::vector<FrameData> frames;
 
 	vk::Sampler texture_sampler;
 
@@ -122,7 +154,7 @@ protected:
 
 		StringHash pipeline_hash{ 0 };
 		StringHash depth_pipeline_hash{ 0 };
-		StringHash color_texture_hash{ DEFAULT_TEXTURE_NAME };
+		StringHash material_hash{ 0 };
 
 		size_t vertex_count{ 0 };
 		size_t index_count{ 0 };
@@ -195,7 +227,7 @@ public:
 			return ret;
 		}
 
-		return register_pipeline_impl(hash_combine({ Name, RendererImpl::DEPTH_PIPELINE_NAME }), depthPipeline);
+		return register_pipeline_impl(hash_combine(Name, RendererImpl::DEPTH_PIPELINE_NAME), depthPipeline);
 	}
 
 private:

@@ -3,7 +3,9 @@
 #include "util.h"
 #include "renderingtypes.h"
 
+#include <variant>
 #include <vector>
+#include <span>
 #include <cstdint>
 
 struct Mesh {
@@ -11,10 +13,9 @@ struct Mesh {
 	using VertexType = Vertex;
 	using IndexType = uint32_t;
 
-	std::string pipeline_name;
-	std::string texture_name;
+	std::string material_name;
 
-	std::vector<VertexType> vertices;
-	std::vector<IndexType> indices;
+	std::variant<std::span<VertexType>, std::vector<VertexType>> vertices;
+	std::variant<std::span<IndexType>, std::vector<IndexType>> indices;
 
 };

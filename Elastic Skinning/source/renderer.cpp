@@ -123,12 +123,6 @@ RendererImpl::~RendererImpl() {
 			context->destroy_texture(texture.second.texture);
 		}
 
-		for (auto& bufferList : frame_data_buffers) {
-			for (auto& buffer : bufferList.second) {
-				context->destroy_buffer(buffer);
-			}
-		}
-
 		for (auto& mesh : meshes) {
 			context->destroy_buffer(mesh.vertex_buffer);
 			context->destroy_buffer(mesh.index_buffer);
@@ -207,6 +201,69 @@ RendererImpl::Error RendererImpl::register_pipeline_impl(StringHash Name, GfxPip
 	return Error::OK;
 }
 
+RendererImpl::Error RendererImpl::register_material(const Material& Material) {
+	StringHash materialName = CRC::crc64(Material.name);
+
+	return register_material(materialName, Material);
+}
+
+RendererImpl::Error RendererImpl::register_material(StringHash Name, const Material& Material) {
+	if (materials.contains(Name)) {
+		return Error::MATERIAL_WITH_NAME_ALREADY_EXISTS;
+	}
+
+	StringHash albedoName = Material.albedo.has_value() ?
+		hash_combine(Name, ALBEDO_TEXTURE_NAME) : NULL_HASH;
+	StringHash normalName = Material.normal.has_value() ?
+		hash_combine(Name, NORMAL_TEXTURE_NAME) : NULL_HASH;
+	StringHash metalName = Material.metallic_roughness.has_value() ?
+		hash_combine(Name, METALROUGH_TEXTURE_NAME) : NULL_HASH;
+
+	if (albedoName != NULL_HASH) {
+		Error e = register_texture(albedoName, Material.albedo.value().image);
+
+		if (e != Error::OK) {
+			return e;
+		}
+	}
+
+	if (normalName != NULL_HASH) {
+		Error e = register_texture(normalName, Material.normal.value().image);
+
+		if (e != Error::OK) {
+			return e;
+		}
+	}
+
+	if (metalName != NULL_HASH) {
+		Error e = register_texture(metalName, Material.metallic_roughness.value().image);
+
+		if (e != Error::OK) {
+			return e;
+		}
+	}
+
+	materials[Name] = {
+		((albedoName != NULL_HASH) ? albedoName : DEFAULT_TEXTURE_NAME),
+		normalName,
+		metalName,
+		CRC::crc64(Material.pipeline_name),
+		Material.albedo_factor,
+		Material.metallic_factor,
+		Material.roughness_factor
+	};
+
+	return Error::OK;
+}
+
+RendererImpl::Error RendererImpl::set_default_material(const Material& Material) {
+	if (materials.contains(DEFAULT_MATERIAL_NAME)) {
+		materials.erase(DEFAULT_MATERIAL_NAME);
+	}
+
+	return register_material(DEFAULT_MATERIAL_NAME, Material);
+}
+
 RendererImpl::Error RendererImpl::register_texture(const std::string& Name, const Image& Image) {
 	return register_texture(CRC::crc64(Name), Image);
 }
@@ -250,37 +307,41 @@ RendererImpl::Error RendererImpl::set_default_texture(const Image& Image) {
 }
 
 Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
-	InternalMesh digestedMesh;
-	digestedMesh.pipeline_hash = CRC::crc64(Mesh.pipeline_name);
-	digestedMesh.depth_pipeline_hash = hash_combine({ digestedMesh.pipeline_hash, RendererImpl::DEPTH_PIPELINE_NAME });
-	digestedMesh.color_texture_hash = DEFAULT_TEXTURE_NAME;
+	StringHash MaterialName = Mesh.material_name.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(Mesh.material_name);
 
-	if (!Mesh.texture_name.empty()) {
-		digestedMesh.color_texture_hash = CRC::crc64(Mesh.texture_name);
+	if (!materials.contains(MaterialName)) {
+		return { {}, RendererImpl::Error::MATERIAL_NOT_FOUND };
 	}
+	
+	InternalMaterial& material = materials[MaterialName];
 
-	digestedMesh.vertex_count = Mesh.vertices.size();
-	digestedMesh.index_count = Mesh.indices.size();
+	InternalMesh digestedMesh;
+	digestedMesh.pipeline_hash = material.pipeline_name;
+	digestedMesh.depth_pipeline_hash = hash_combine(digestedMesh.pipeline_hash, RendererImpl::DEPTH_PIPELINE_NAME);
+	digestedMesh.material_hash = MaterialName;
+
+	digestedMesh.vertex_count = std::visit([](auto&& v) { return v.size(); }, Mesh.vertices);
+	digestedMesh.index_count = std::visit([](auto&& v) { return v.size(); }, Mesh.indices);
 
 	/*
 	* Create and allocate GPU buffer for vertices
 	*/
-	size_t vertexMemorySize = sizeof(Mesh::VertexType) * Mesh.vertices.size();
+	size_t vertexMemorySize = sizeof(Mesh::VertexType) * std::visit([](auto&& v) { return v.size(); }, Mesh.vertices);
 
 	digestedMesh.vertex_buffer = context->create_vertex_buffer(vertexMemorySize);
 
 	/*
 	* Create and allocate GPU buffer for indices
 	*/
-	size_t indexMemorySize = sizeof(Mesh::IndexType) * Mesh.indices.size();
+	size_t indexMemorySize = sizeof(Mesh::IndexType) * std::visit([](auto&& v) { return v.size(); }, Mesh.indices);
 
 	digestedMesh.index_buffer = context->create_index_buffer(indexMemorySize);
 
 	/*
 	* Upload data to GPU
 	*/
-	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, Mesh.vertices.data(), vertexMemorySize);
-	context->upload_to_gpu_buffer(digestedMesh.index_buffer, Mesh.indices.data(), indexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, std::visit([](auto&& v) { return v.data(); }, Mesh.vertices), vertexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.index_buffer, std::visit([](auto&& v) { return v.data(); }, Mesh.indices), indexMemorySize);
 
 	/*
 	* Allocate command buffers
@@ -378,12 +439,18 @@ void RendererImpl::create_render_state() {
 	}
 
 	/*
+	* Create per swapchain frame data
+	*/
+
+	frames.resize(render_swapchain.size());
+
+	/*
 	* Create depth buffers
 	*/
 
-	depthbuffers.resize(render_swapchain.size());
+	for (auto& frame : frames) {
+		auto& depthBuffer = frame.depthbuffer;
 
-	for (auto& depthBuffer : depthbuffers) {
 		depthBuffer.texture = context->create_depth_buffer(render_swapchain.extent);
 		context->transition_image_layout(depthBuffer.texture, depthBuffer.texture.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
@@ -405,7 +472,7 @@ void RendererImpl::create_render_state() {
 	*/
 
 	vk::AttachmentDescription depthAttachment;
-	depthAttachment.format = depthbuffers[0].texture.format;
+	depthAttachment.format = frames[0].depthbuffer.texture.format;
 	depthAttachment.samples = vk::SampleCountFlagBits::e1;
 	depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
 	depthAttachment.storeOp = vk::AttachmentStoreOp::eDontCare;
@@ -500,11 +567,9 @@ void RendererImpl::create_render_state() {
 	* Create framebuffers
 	*/
 
-	framebuffers.resize(render_swapchain.size());
-
-	for (size_t i = 0; i < framebuffers.size(); i++) {
+	for (size_t i = 0; i < frames.size(); i++) {
 		std::vector<vk::ImageView> attachments{
-			depthbuffers[i].view,
+			frames[i].depthbuffer.view,
 			render_swapchain.image_views[i]
 		};
 
@@ -523,22 +588,22 @@ void RendererImpl::create_render_state() {
 			return;
 		}
 
-		framebuffers[i] = framebuffer;
+		frames[i].framebuffer = framebuffer;
 	}
 }
 
 void RendererImpl::destroy_render_state() {
 	context->primary_logical_device.destroy(geometry_render_pass);
 
-	for (auto framebuffer : framebuffers) {
-		context->primary_logical_device.destroy(framebuffer);
-	}
+	for (auto& frame : frames) {
+		context->primary_logical_device.destroy(frame.framebuffer);
 
-	framebuffers.clear();
+		context->primary_logical_device.destroy(frame.depthbuffer.view);
+		context->destroy_texture(frame.depthbuffer.texture);
 
-	for (auto& depthBuffer : depthbuffers) {
-		context->primary_logical_device.destroy(depthBuffer.view);
-		context->destroy_texture(depthBuffer.texture);
+		for (auto& buffer : frame.data_buffers) {
+			context->destroy_buffer(buffer.second);
+		}
 	}
 
 	render_swapchain.deinit();
@@ -556,7 +621,7 @@ void RendererImpl::update_frame_data(Swapchain::FrameId ImageIdx) {
 	std::vector<VkDeviceSize> updated_allocation_sizes;
 
 	for (auto& name : buffer_type_names) {
-		VmaAllocation activeAllocation = frame_data_buffers[name][ImageIdx].allocation;
+		VmaAllocation activeAllocation = frames[ImageIdx].data_buffers[name].allocation;
 
 		if (name == ModelBuffer::name()) {
 			std::vector<glm::mat4> modelmats;
@@ -614,18 +679,14 @@ void RendererImpl::finish_mesh_digestion() {
 	for (auto& name : buffer_type_names) {
 		// Only allocate SSBOs that are per mesh
 		if (buffer_type_is_per_mesh[name]) {
-			frame_data_buffers[name].resize(render_swapchain.size());
-
-			for (auto& ssbo : frame_data_buffers[name]) {
-				ssbo = context->create_storage_buffer(buffer_type_sizes[name] * meshes.size());
+			for (auto& frame : frames) {
+				frame.data_buffers[name] = context->create_storage_buffer(buffer_type_sizes[name] * meshes.size());
 			}
 		}
 		// Allocate UBOs that aren't per mesh
 		else {
-			frame_data_buffers[name].resize(render_swapchain.size());
-
-			for (auto& ubo : frame_data_buffers[name]) {
-				ubo = context->create_uniform_buffer(buffer_type_sizes[name]);
+			for (auto& frame : frames) {
+				frame.data_buffers[name] = context->create_uniform_buffer(buffer_type_sizes[name]);
 			}
 		}
 	}
@@ -683,7 +744,11 @@ void RendererImpl::finish_mesh_digestion() {
 		bufferDescriptorSetInfo.descriptorSetCount = static_cast<uint32_t>(bufferLayouts.size());
 		bufferDescriptorSetInfo.pSetLayouts = bufferLayouts.data();
 
-		buffer_descriptor_sets[pipeline.first] = context->primary_logical_device.allocateDescriptorSets(bufferDescriptorSetInfo);
+		auto descriptorSets = context->primary_logical_device.allocateDescriptorSets(bufferDescriptorSetInfo);
+	
+		for (size_t i = 0; i < descriptorSets.size(); i++) {
+			frames[i].buffer_descriptor_sets[pipeline.first] = descriptorSets[i];
+		}
 	}
 
 	// Allocate texture descriptor sets
@@ -697,7 +762,7 @@ void RendererImpl::finish_mesh_digestion() {
 				textureDescriptorSetInfo.descriptorSetCount = 1;
 				textureDescriptorSetInfo.pSetLayouts = &textureLayout;
 
-				StringHash compositeName = hash_combine({ pipeline.first, sampler, texture.first });
+				StringHash compositeName = hash_combine(pipeline.first, sampler, texture.first);
 				texture_descriptor_sets[compositeName] = context->primary_logical_device.allocateDescriptorSets(textureDescriptorSetInfo)[0];
 			}
 		}
@@ -718,7 +783,7 @@ void RendererImpl::finish_mesh_digestion() {
 					vk::WriteDescriptorSet descriptorWrite;
 
 					// buffer_descriptor_sets[Pipeline Name][Swapchain Image #]
-					descriptorWrite.dstSet = buffer_descriptor_sets[pipeline.first][i];
+					descriptorWrite.dstSet = frames[i].buffer_descriptor_sets[pipeline.first];
 					descriptorWrite.dstBinding = pipeline.second.descriptor_layout_bindings[descriptorName].binding;
 					descriptorWrite.dstArrayElement = 0;
 					descriptorWrite.descriptorType = pipeline.second.descriptor_layout_bindings[descriptorName].descriptorType;
@@ -726,7 +791,7 @@ void RendererImpl::finish_mesh_digestion() {
 
 					vk::DescriptorBufferInfo bufferInfo;
 					// frame_data_buffers[Buffer Type][Swapchain Image #]
-					bufferInfo.buffer = frame_data_buffers[descriptorName][i].buffer;
+					bufferInfo.buffer = frames[i].data_buffers[descriptorName].buffer;
 					bufferInfo.offset = 0;
 					bufferInfo.range = VK_WHOLE_SIZE;
 
@@ -747,7 +812,7 @@ void RendererImpl::finish_mesh_digestion() {
 					vk::WriteDescriptorSet descriptorWrite;
 
 					// texture_descriptor_sets[Pipeline Name][Sampler Name][Texture Name]
-					StringHash compositeName = hash_combine({ pipeline.first, descriptorName, texture.first });
+					StringHash compositeName = hash_combine(pipeline.first, descriptorName, texture.first);
 					descriptorWrite.dstSet = texture_descriptor_sets[compositeName];
 					descriptorWrite.dstBinding = pipeline.second.descriptor_layout_bindings[descriptorName].binding;
 					descriptorWrite.dstArrayElement = 0;
@@ -790,7 +855,7 @@ void RendererImpl::record_command_buffers() {
 
 		vk::RenderPassBeginInfo renderPassInfo;
 		renderPassInfo.renderPass = geometry_render_pass;
-		renderPassInfo.framebuffer = framebuffers[i];
+		renderPassInfo.framebuffer = frames[i].framebuffer;
 		renderPassInfo.renderArea.offset = vk::Offset2D{ 0,0 };
 		renderPassInfo.renderArea.extent = render_swapchain.extent;
 
@@ -821,7 +886,7 @@ void RendererImpl::record_command_buffers() {
 				pipeline->pipeline
 			);
 
-			std::vector<vk::DescriptorSet> descriptorSets = { buffer_descriptor_sets[meshes[meshId].pipeline_hash][i] };
+			std::vector<vk::DescriptorSet> descriptorSets = { frames[i].buffer_descriptor_sets[meshes[meshId].pipeline_hash] };
 			
 			currentCommandBuffer.bindDescriptorSets(
 				vk::PipelineBindPoint::eGraphics,
@@ -867,10 +932,11 @@ void RendererImpl::record_command_buffers() {
 				pipeline->pipeline
 			);
 
-			std::vector<vk::DescriptorSet> descriptorSets = { buffer_descriptor_sets[meshes[meshId].pipeline_hash][i] };
+			std::vector<vk::DescriptorSet> descriptorSets = { frames[i].buffer_descriptor_sets[meshes[meshId].pipeline_hash] };
 
 			if (std::find(sampler_type_names.begin(), sampler_type_names.end(), ColorSampler::name()) != sampler_type_names.end()) {
-				StringHash compositeName = hash_combine({ meshes[meshId].pipeline_hash, ColorSampler::name(), meshes[meshId].color_texture_hash });
+				InternalMaterial material = materials[meshes[meshId].material_hash];
+				StringHash compositeName = hash_combine(meshes[meshId].pipeline_hash, ColorSampler::name(), material.albedo_texture_name);
 				descriptorSets.push_back(texture_descriptor_sets[compositeName]);
 			}
 

@@ -24,7 +24,8 @@ set(SOURCE
 	"source/mesh.cpp"
 	"source/deps_impl.cpp"
 	"include/renderingtypes.h"
- "include/crc.h")
+	"include/crc.h"
+ "include/model.h")
 
 file(GLOB
 	SHADERS
@@ -57,11 +58,14 @@ target_link_libraries(
 	SDL2::SDL2
 	glm::glm
 	Vulkan::Vulkan
+	tinygltf
 )
 
 target_compile_definitions(
 	${ProjectName}
 	PUBLIC
+	"TINYGLTF_NO_INCLUDE_STB_IMAGE"
+	"TINYGLTF_NO_INCLUDE_STB_IMAGE_WRITE"
 	"GLM_FORCE_DEPTH_ZERO_TO_ONE"
 )
 
