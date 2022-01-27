@@ -53,8 +53,6 @@ int main(int argc, char** argv) {
 	renderer.register_material(colortestmaterial);
 	renderer.set_default_material(defaultmaterial);
 
-	Retval<Model, AssetError> model = load_model("models/plaidtube.glb");
-
 	Mesh triangle;
 	ModelTransform t1;
 	t1.position.x = -0.5;
@@ -132,6 +130,10 @@ int main(int argc, char** argv) {
 	};
 	z.position = { 0.0f, 0.0f, 1.0f };
 
+	Retval<Model, AssetError> model = load_model("models/plaidtube.glb");
+	ModelTransform model_transform;
+	model_transform.scale = { 0.25f, 0.25f, 0.25f };
+
 	renderer.digest_mesh(triangle, &t1);
 	renderer.digest_mesh(triangle2, &t2);
 	renderer.digest_mesh(square, &s1);
@@ -139,6 +141,8 @@ int main(int argc, char** argv) {
 	renderer.digest_mesh(x_note, &x);
 	renderer.digest_mesh(y_note, &y);
 	renderer.digest_mesh(z_note, &z);
+
+	renderer.digest_model(model.value, &model_transform);
 
 	Camera c;
 	c.look_at(
@@ -159,15 +163,21 @@ int main(int argc, char** argv) {
 		auto current_time = std::chrono::steady_clock::now();
 
 		std::chrono::milliseconds t = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time);
+		float t_f = static_cast<float>(t.count());
 
-		float sin_t = glm::sin(static_cast<float>(t.count()) / 200.f);
-		float sin_15t_5 = glm::sin(1.5f * static_cast<float>(t.count() + 0.5f) / 200.f);
+		float sin_t = glm::sin(t_f / 200.f);
+		float sin_15t_5 = glm::sin(1.5f * (t_f + 0.5f) / 200.f);
 		float rocker_t = glm::pow(glm::abs(sin_t) + 1.0f, 2.0f) / 2.0f;
 
 		s1.position.x = sin_t;
 		s1.scale = { rocker_t, rocker_t, rocker_t };
 		t1.position.y = sin_t;
 		t2.position.y = -sin_15t_5;
+
+		auto r1 = glm::rotate(glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f }, 0.0007f * t_f, glm::vec3{ 0.0f, 1.0f, 0.0f });
+		auto r2 = glm::rotate(glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f }, (0.0022f * t_f) + glm::pow(sin_t + 1.0f, 2.0f), glm::vec3{1.0f, 0.0f, 1.0f});
+			
+		model_transform.rotation = r1 * r2;
 
 		renderer.draw_frame();
 	}

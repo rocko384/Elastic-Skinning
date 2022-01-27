@@ -41,6 +41,7 @@ public:
 	};
 
 	using MeshId = uint32_t;
+	using ModelId = uint32_t;
 
 	RendererImpl(GfxContext* Context);
 	~RendererImpl();
@@ -59,6 +60,7 @@ public:
 	Error set_default_texture(const Image& Image);
 
 	Retval<MeshId, Error> digest_mesh(Mesh Mesh, ModelTransform* Transform);
+	Retval<ModelId, Error> digest_model(Model Model, ModelTransform* Transform);
 
 	void set_camera(Camera* Camera);
 

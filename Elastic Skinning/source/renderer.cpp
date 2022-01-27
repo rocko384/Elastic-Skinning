@@ -320,28 +320,28 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh
 	digestedMesh.depth_pipeline_hash = hash_combine(digestedMesh.pipeline_hash, RendererImpl::DEPTH_PIPELINE_NAME);
 	digestedMesh.material_hash = MaterialName;
 
-	digestedMesh.vertex_count = std::visit([](auto&& v) { return v.size(); }, Mesh.vertices);
-	digestedMesh.index_count = std::visit([](auto&& v) { return v.size(); }, Mesh.indices);
+	digestedMesh.vertex_count = Mesh.vertices.size();
+	digestedMesh.index_count = Mesh.indices.size();
 
 	/*
 	* Create and allocate GPU buffer for vertices
 	*/
-	size_t vertexMemorySize = sizeof(Mesh::VertexType) * std::visit([](auto&& v) { return v.size(); }, Mesh.vertices);
+	size_t vertexMemorySize = sizeof(Mesh::VertexType) * Mesh.vertices.size();
 
 	digestedMesh.vertex_buffer = context->create_vertex_buffer(vertexMemorySize);
 
 	/*
 	* Create and allocate GPU buffer for indices
 	*/
-	size_t indexMemorySize = sizeof(Mesh::IndexType) * std::visit([](auto&& v) { return v.size(); }, Mesh.indices);
+	size_t indexMemorySize = sizeof(Mesh::IndexType) * Mesh.indices.size();
 
 	digestedMesh.index_buffer = context->create_index_buffer(indexMemorySize);
 
 	/*
 	* Upload data to GPU
 	*/
-	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, std::visit([](auto&& v) { return v.data(); }, Mesh.vertices), vertexMemorySize);
-	context->upload_to_gpu_buffer(digestedMesh.index_buffer, std::visit([](auto&& v) { return v.data(); }, Mesh.indices), indexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, Mesh.vertices.data(), vertexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.index_buffer, Mesh.indices.data(), indexMemorySize);
 
 	/*
 	* Allocate command buffers
@@ -355,6 +355,18 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh
 	meshes.push_back(digestedMesh);
 
 	return { static_cast<MeshId>(meshes.size() - 1), Error::OK };
+}
+
+Retval<RendererImpl::ModelId, RendererImpl::Error> RendererImpl::digest_model(Model Model, ModelTransform* Transform) {
+	for (auto& material : Model.materials) {
+		register_material(material);
+	}
+
+	for (auto& mesh : Model.meshes) {
+		digest_mesh(mesh, Transform);
+	}
+
+	return { 0, Error::OK };
 }
 
 void RendererImpl::set_camera(Camera* Camera) {

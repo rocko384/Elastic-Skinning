@@ -201,23 +201,7 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 	}
 
 	// Mesh data
-	size_t total_vertices = 0;
-	size_t total_indices = 0;
-
-	for (auto& mesh : model.meshes) {
-		int pos_accessor_index = mesh.primitives[0].attributes["POSITION"];
-		int index_accessor_index = model.meshes[0].primitives[0].indices;
-
-		total_vertices += model.accessors[pos_accessor_index].count;
-		total_indices += model.accessors[index_accessor_index].count;
-	}
-
 	ret.meshes.resize(model.meshes.size());
-	ret.vertices.resize(total_vertices);
-	ret.indices.resize(total_indices);
-
-	size_t vertex_offset = 0;
-	size_t index_offset = 0;
 
 	for (size_t i = 0; i < ret.meshes.size(); i++) {
 		auto& primitive = model.meshes[i].primitives[0];
@@ -309,41 +293,30 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 			}, index_accessor);
 		}
 
-		for (size_t vertex = 0; vertex < position_accessor.element_count; vertex++) {
-			ret.vertices[vertex + vertex_offset].position = position_accessor[vertex];
+		size_t index_count = std::visit([](auto&& accessor) { return accessor.element_count; }, index_accessor);
+		ret.meshes[i].vertices.resize(position_accessor.element_count);
+		ret.meshes[i].indices.resize(index_count);
 
-			ret.vertices[vertex + vertex_offset].normal = !normal_accessor.empty() ?
+		for (size_t vertex = 0; vertex < position_accessor.element_count; vertex++) {
+			ret.meshes[i].vertices[vertex].position = position_accessor[vertex];
+
+			ret.meshes[i].vertices[vertex].normal = !normal_accessor.empty() ?
 				normal_accessor[vertex] : glm::vec3{ 0.0f, 0.0f, 0.0f };
 
-			ret.vertices[vertex + vertex_offset].color = !color_accessor.empty() ?
+			ret.meshes[i].vertices[vertex].color = !color_accessor.empty() ?
 				color_accessor[vertex] : glm::vec3{ 1.0f, 1.0f, 1.0f };
 
-			ret.vertices[vertex + vertex_offset].texcoords = !texcoord_accessor.empty() ?
+			ret.meshes[i].vertices[vertex].texcoords = !texcoord_accessor.empty() ?
 				texcoord_accessor[vertex] : glm::vec2{ 0.0f, 0.0f };
 		}
 
-		std::visit([&ret, &index_offset, &vertex_offset](auto&& accessor) {
+		std::visit([&mesh = ret.meshes[i]](auto&& accessor) {
 			for (size_t index = 0; index < accessor.element_count; index++) {
-				ret.indices[index + index_offset] = accessor[index] + vertex_offset;
+				mesh.indices[index] = accessor[index];
 			}
 		}, index_accessor);
 
-		size_t index_count = std::visit([](auto&& accessor) { return accessor.element_count; }, index_accessor);
-
-		ret.meshes[i].vertices = std::span{
-			std::next(ret.vertices.begin(), vertex_offset),
-			std::next(ret.vertices.begin(), vertex_offset + position_accessor.element_count)
-		};
-
-		ret.meshes[i].indices = std::span{
-			std::next(ret.indices.begin(), index_offset),
-			std::next(ret.indices.begin(), index_offset + index_count)
-		};
-
 		ret.meshes[i].material_name = model.materials[primitive.material].name;
-
-		vertex_offset += position_accessor.element_count;
-		index_offset += index_count;
 	}
 
 	// Texture/Material data
@@ -382,6 +355,7 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 		ret.materials[i].roughness_factor = static_cast<float>(material.pbrMetallicRoughness.roughnessFactor);
 
 		ret.materials[i].name = material.name;
+		ret.materials[i].pipeline_name = "base"; /// TODO: Figure out a decent way of deducing / specifying this
 	}
 
 	return {
