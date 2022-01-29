@@ -25,7 +25,10 @@ set(SOURCE
 	"source/deps_impl.cpp"
 	"include/renderingtypes.h"
 	"include/crc.h"
- "include/model.h")
+	"include/model.h"
+	"include/skeleton.h"
+	"include/animation.h"
+ "source/animation.cpp")
 
 file(GLOB
 	SHADERS

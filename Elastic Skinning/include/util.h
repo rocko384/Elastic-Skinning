@@ -22,7 +22,7 @@ struct Retval {
 using BinaryBlob = std::vector<uint8_t>;
 
 struct BinaryBlobView {
-	BinaryBlob* source{ nullptr };
+	const BinaryBlob* source{ nullptr };
 	size_t offset{ 0 };
 	size_t size{ 0 };
 	size_t stride{ 0 };
@@ -31,9 +31,9 @@ struct BinaryBlobView {
 		return (source == nullptr) || (size == 0);
 	}
 
-	BinaryBlob::value_type& operator[](size_t idx) {
+	const BinaryBlob::value_type& operator[](size_t idx) {
 		size_t actual_stride = (stride == 0) ? 1 : stride;
-		return source->operator[](offset + (actual_stride * idx));
+		return source->at(offset + (actual_stride * idx));
 	}
 
 	const bool index_in_bounds(size_t idx) {
@@ -69,7 +69,7 @@ struct BinaryBlobAccessor : public BinaryBlobView {
 		std::array<uint8_t, sizeof(T)> data;
 
 		for (size_t i = 0; i < sizeof(T); i++) {
-			data[i] = source->operator[](base_idx + element_offset + i);
+			data[i] = source->at(base_idx + element_offset + i);
 		}
 
 		return convert_binary_to_type<T>(data);

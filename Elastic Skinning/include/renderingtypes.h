@@ -38,6 +38,8 @@ struct Vertex {
 	glm::vec3 normal;
 	glm::vec3 color;
 	glm::vec2 texcoords;
+	glm::u16vec4 joints;
+	glm::vec4 weights;
 
 	static vk::VertexInputBindingDescription binding_description() {
 		vk::VertexInputBindingDescription retval;
@@ -49,8 +51,8 @@ struct Vertex {
 		return retval;
 	}
 
-	static std::array<vk::VertexInputAttributeDescription, 4> attribute_description() {
-		std::array<vk::VertexInputAttributeDescription, 4> retval;
+	static std::array<vk::VertexInputAttributeDescription, 6> attribute_description() {
+		std::array<vk::VertexInputAttributeDescription, 6> retval;
 
 		retval[0].binding = 0;
 		retval[0].location = 0;
@@ -71,6 +73,16 @@ struct Vertex {
 		retval[3].location = 3;
 		retval[3].format = vk::Format::eR32G32Sfloat;
 		retval[3].offset = offsetof(Vertex, texcoords);
+
+		retval[4].binding = 0;
+		retval[4].location = 4;
+		retval[4].format = vk::Format::eR16G16B16A16Uint;
+		retval[4].offset = offsetof(Vertex, joints);
+
+		retval[5].binding = 0;
+		retval[5].location = 5;
+		retval[5].format = vk::Format::eR32G32B32A32Sfloat;
+		retval[5].offset = offsetof(Vertex, weights);
 
 		return retval;
 	}

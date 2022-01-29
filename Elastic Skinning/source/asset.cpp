@@ -176,6 +176,23 @@ static const Image tinygltf_image_convert(const tinygltf::Image& i) {
 	};
 }
 
+template <typename T>
+static const BinaryBlobAccessor<T> tinygltf_accessor_convert(const tinygltf::Model& model, const tinygltf::Accessor& accessor) {
+	BinaryBlobAccessor<T> ret;
+
+	const auto& view = model.bufferViews[accessor.bufferView];
+	const auto& buffer = model.buffers[view.buffer];
+
+	ret.element_offset = accessor.byteOffset;
+	ret.element_count = accessor.count;
+	ret.offset = view.byteOffset;
+	ret.size = view.byteLength;
+	ret.stride = view.byteStride;
+	ret.source = &buffer.data;
+
+	return ret;
+}
+
 Retval<Model, AssetError> load_model(std::filesystem::path path) {
 
 	Model ret;
@@ -201,122 +218,251 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 	}
 
 	// Mesh data
-	ret.meshes.resize(model.meshes.size());
+	for (auto& node : model.nodes) {
+		if (node.mesh > -1) {
+			Mesh outMesh;
 
-	for (size_t i = 0; i < ret.meshes.size(); i++) {
-		auto& primitive = model.meshes[i].primitives[0];
+			auto& mesh = model.meshes[node.mesh];
+			auto& primitive = mesh.primitives[0];
 
-		BinaryBlobAccessor<glm::vec3> position_accessor;
-		BinaryBlobAccessor<glm::vec3> normal_accessor;
-		BinaryBlobAccessor<glm::vec3> color_accessor;
-		BinaryBlobAccessor<glm::vec2> texcoord_accessor;
+			BinaryBlobAccessor<glm::vec3> position_accessor;
+			BinaryBlobAccessor<glm::vec3> normal_accessor;
+			BinaryBlobAccessor<glm::vec3> color_accessor;
+			BinaryBlobAccessor<glm::vec2> texcoord_accessor;
+			std::variant<
+				BinaryBlobAccessor<glm::u8vec4>,
+				BinaryBlobAccessor<glm::u16vec4>
+			> joints_accessor;
+			BinaryBlobAccessor<glm::vec4> weights_accessor;
 
-		std::variant<
-			BinaryBlobAccessor<uint16_t>,
-			BinaryBlobAccessor<uint32_t>
-		> index_accessor;
+			std::variant<
+				BinaryBlobAccessor<uint16_t>,
+				BinaryBlobAccessor<uint32_t>
+			> index_accessor;
 
-		if (primitive.attributes.contains("POSITION")) {
-			int accessor_idx = primitive.attributes["POSITION"];
-			int view_idx = model.accessors[accessor_idx].bufferView;
-			int buffer_idx = model.bufferViews[view_idx].buffer;
+			if (primitive.attributes.contains("POSITION")) {
+				int accessor_idx = primitive.attributes["POSITION"];
 
-			position_accessor.element_offset = model.accessors[accessor_idx].byteOffset;
-			position_accessor.element_count = model.accessors[accessor_idx].count;
-			position_accessor.offset = model.bufferViews[view_idx].byteOffset;
-			position_accessor.size = model.bufferViews[view_idx].byteLength;
-			position_accessor.stride = model.bufferViews[view_idx].byteStride;
-			position_accessor.source = &model.buffers[buffer_idx].data;
-		}
-
-		if (primitive.attributes.contains("NORMAL")) {
-			int accessor_idx = primitive.attributes["NORMAL"];
-			int view_idx = model.accessors[accessor_idx].bufferView;
-			int buffer_idx = model.bufferViews[view_idx].buffer;
-
-			normal_accessor.element_offset = model.accessors[accessor_idx].byteOffset;
-			normal_accessor.element_count = model.accessors[accessor_idx].count;
-			normal_accessor.offset = model.bufferViews[view_idx].byteOffset;
-			normal_accessor.size = model.bufferViews[view_idx].byteLength;
-			normal_accessor.stride = model.bufferViews[view_idx].byteStride;
-			normal_accessor.source = &model.buffers[buffer_idx].data;
-		}
-
-		if (primitive.attributes.contains("COLOR_0")) {
-			int accessor_idx = primitive.attributes["COLOR_0"];
-			int view_idx = model.accessors[accessor_idx].bufferView;
-			int buffer_idx = model.bufferViews[view_idx].buffer;
-
-			color_accessor.element_offset = model.accessors[accessor_idx].byteOffset;
-			color_accessor.element_count = model.accessors[accessor_idx].count;
-			color_accessor.offset = model.bufferViews[view_idx].byteOffset;
-			color_accessor.size = model.bufferViews[view_idx].byteLength;
-			color_accessor.stride = model.bufferViews[view_idx].byteStride;
-			color_accessor.source = &model.buffers[buffer_idx].data;
-		}
-
-		if (primitive.attributes.contains("TEXCOORD_0")) {
-			int accessor_idx = primitive.attributes["TEXCOORD_0"];
-			int view_idx = model.accessors[accessor_idx].bufferView;
-			int buffer_idx = model.bufferViews[view_idx].buffer;
-
-			texcoord_accessor.element_offset = model.accessors[accessor_idx].byteOffset;
-			texcoord_accessor.element_count = model.accessors[accessor_idx].count;
-			texcoord_accessor.offset = model.bufferViews[view_idx].byteOffset;
-			texcoord_accessor.size = model.bufferViews[view_idx].byteLength;
-			texcoord_accessor.stride = model.bufferViews[view_idx].byteStride;
-			texcoord_accessor.source = &model.buffers[buffer_idx].data;
-		}
-
-		// Index data accessor prep.
-		// Maybe should be conditionally verified, but I can't imagine
-		// using a non-indexed mesh is likely
-		{
-			int accessor_idx = primitive.indices;
-			int view_idx = model.accessors[accessor_idx].bufferView;
-			int buffer_idx = model.bufferViews[view_idx].buffer;
-
-			switch (model.accessors[accessor_idx].componentType) {
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: index_accessor = BinaryBlobAccessor<uint16_t>();
-				break;
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: index_accessor = BinaryBlobAccessor<uint32_t>();
-				break;
+				position_accessor = tinygltf_accessor_convert<glm::vec3>(model, model.accessors[accessor_idx]);
 			}
 
-			std::visit([&model, &accessor_idx, &view_idx, &buffer_idx](auto&& accessor) {
-				accessor.element_offset = model.accessors[accessor_idx].byteOffset;
-				accessor.element_count = model.accessors[accessor_idx].count;
-				accessor.offset = model.bufferViews[view_idx].byteOffset;
-				accessor.size = model.bufferViews[view_idx].byteLength;
-				accessor.stride = model.bufferViews[view_idx].byteStride;
-				accessor.source = &model.buffers[buffer_idx].data;
+			if (primitive.attributes.contains("NORMAL")) {
+				int accessor_idx = primitive.attributes["NORMAL"];
+
+				normal_accessor = tinygltf_accessor_convert<glm::vec3>(model, model.accessors[accessor_idx]);
+			}
+
+			if (primitive.attributes.contains("COLOR_0")) {
+				int accessor_idx = primitive.attributes["COLOR_0"];
+
+				color_accessor = tinygltf_accessor_convert<glm::vec3>(model, model.accessors[accessor_idx]);
+			}
+
+			if (primitive.attributes.contains("TEXCOORD_0")) {
+				int accessor_idx = primitive.attributes["TEXCOORD_0"];
+
+				texcoord_accessor = tinygltf_accessor_convert<glm::vec2>(model, model.accessors[accessor_idx]);
+			}
+
+			if (primitive.attributes.contains("JOINTS_0")) {
+				int accessor_idx = primitive.attributes["JOINTS_0"];
+				auto& accessor = model.accessors[accessor_idx];
+				
+				switch (accessor.componentType) {
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+					joints_accessor = tinygltf_accessor_convert<glm::u8vec4>(model, accessor);
+					break;
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+					joints_accessor = tinygltf_accessor_convert<glm::u16vec4>(model, accessor);
+					break;
+				}
+			}
+
+			if (primitive.attributes.contains("WEIGHTS_0")) {
+				int accessor_idx = primitive.attributes["WEIGHTS_0"];
+
+				weights_accessor = tinygltf_accessor_convert<glm::vec4>(model, model.accessors[accessor_idx]);
+			}
+
+			// Index data accessor prep.
+			// Maybe should be conditionally verified, but I can't imagine
+			// using a non-indexed mesh is likely
+			{
+				int accessor_idx = primitive.indices;
+				auto& accessor = model.accessors[accessor_idx];
+
+				switch (accessor.componentType) {
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+					index_accessor = tinygltf_accessor_convert<uint16_t>(model, accessor);
+					break;
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+					index_accessor = tinygltf_accessor_convert<uint32_t>(model, accessor);
+					break;
+				}
+			}
+
+			size_t index_count = std::visit([](auto&& accessor) { return accessor.element_count; }, index_accessor);
+			outMesh.vertices.resize(position_accessor.element_count);
+			outMesh.indices.resize(index_count);
+
+			for (size_t vertex = 0; vertex < position_accessor.element_count; vertex++) {
+				outMesh.vertices[vertex].position = position_accessor[vertex];
+
+				outMesh.vertices[vertex].normal = !normal_accessor.empty() ?
+					normal_accessor[vertex] : glm::vec3{ 0.0f, 0.0f, 0.0f };
+
+				outMesh.vertices[vertex].color = !color_accessor.empty() ?
+					color_accessor[vertex] : glm::vec3{ 1.0f, 1.0f, 1.0f };
+
+				outMesh.vertices[vertex].texcoords = !texcoord_accessor.empty() ?
+					texcoord_accessor[vertex] : glm::vec2{ 0.0f, 0.0f };
+
+				bool is_joints_accessor_empty = std::visit([](auto&& accessor) {
+					return accessor.empty();
+					}, joints_accessor);
+
+				if (!is_joints_accessor_empty) {
+					std::visit([&outMesh, vertex](auto&& accessor) {
+						outMesh.vertices[vertex].joints = accessor[vertex];
+						}, joints_accessor);
+				}
+				else {
+					outMesh.vertices[vertex].joints = glm::u16vec4{ 0, 0, 0, 0 };
+				}
+
+				outMesh.vertices[vertex].weights = !weights_accessor.empty() ?
+					weights_accessor[vertex] : glm::vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+			}
+
+			std::visit([&outMesh](auto&& accessor) {
+				for (size_t index = 0; index < accessor.element_count; index++) {
+					outMesh.indices[index] = accessor[index];
+				}
 			}, index_accessor);
-		}
 
-		size_t index_count = std::visit([](auto&& accessor) { return accessor.element_count; }, index_accessor);
-		ret.meshes[i].vertices.resize(position_accessor.element_count);
-		ret.meshes[i].indices.resize(index_count);
+			outMesh.material_name = model.materials[primitive.material].name;
 
-		for (size_t vertex = 0; vertex < position_accessor.element_count; vertex++) {
-			ret.meshes[i].vertices[vertex].position = position_accessor[vertex];
+			ret.meshes.push_back(outMesh);
 
-			ret.meshes[i].vertices[vertex].normal = !normal_accessor.empty() ?
-				normal_accessor[vertex] : glm::vec3{ 0.0f, 0.0f, 0.0f };
+			// Skeleton data
+			if (node.skin > -1) {
+				auto& skin = model.skins[node.skin];
+				auto matrix_accessor = tinygltf_accessor_convert<glm::mat4>(model, model.accessors[skin.inverseBindMatrices]);
 
-			ret.meshes[i].vertices[vertex].color = !color_accessor.empty() ?
-				color_accessor[vertex] : glm::vec3{ 1.0f, 1.0f, 1.0f };
+				ret.skeleton.bones.resize(skin.joints.size());
+				ret.skeleton.bone_names.resize(skin.joints.size());
 
-			ret.meshes[i].vertices[vertex].texcoords = !texcoord_accessor.empty() ?
-				texcoord_accessor[vertex] : glm::vec2{ 0.0f, 0.0f };
-		}
+				for (size_t i = 0; i < ret.skeleton.bones.size(); i++) {
+					auto& joint = model.nodes[skin.joints[i]];
 
-		std::visit([&mesh = ret.meshes[i]](auto&& accessor) {
-			for (size_t index = 0; index < accessor.element_count; index++) {
-				mesh.indices[index] = accessor[index];
+					ret.skeleton.bones[i].inverse_bind_matrix = matrix_accessor[i];
+
+					bool has_rotation = joint.rotation.size() != 0;
+					bool has_position = joint.translation.size() != 0;
+					bool has_scale = joint.scale.size() != 0;
+
+					ret.skeleton.bones[i].rotation = has_rotation ?
+						glm::quat{
+							static_cast<float>(joint.rotation[0]),
+							static_cast<float>(joint.rotation[1]),
+							static_cast<float>(joint.rotation[2]),
+							static_cast<float>(joint.rotation[3])
+								} : glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f };
+
+					ret.skeleton.bones[i].position = has_position ?
+						glm::vec3{
+							static_cast<float>(joint.translation[0]),
+							static_cast<float>(joint.translation[1]),
+							static_cast<float>(joint.translation[2])
+								} : glm::vec3{ 0.0f, 0.0f, 0.0f };
+
+					ret.skeleton.bones[i].scale = has_scale ?
+						glm::vec3{
+							static_cast<float>(joint.rotation[0]),
+							static_cast<float>(joint.rotation[1]),
+							static_cast<float>(joint.rotation[2])
+						} : glm::vec3{ 1.0f, 1.0f, 1.0f };
+
+					ret.skeleton.bone_names[i] = CRC::crc64(joint.name);
+				}
 			}
-		}, index_accessor);
+		}
+	}
 
-		ret.meshes[i].material_name = model.materials[primitive.material].name;
+	// Animation data
+	ret.skeleton.animations.resize(model.animations.size());
+	ret.skeleton.animation_names.resize(model.animations.size());
+
+	for (size_t i = 0; i < ret.skeleton.animations.size(); i++) {
+		auto& animation = model.animations[i];
+
+		std::vector<Channel> outChannels(ret.skeleton.bones.size());
+		std::vector<StringHash> outChannelNames(ret.skeleton.bones.size());
+
+		for (size_t channel = 0; channel < outChannelNames.size(); channel++) {
+			outChannelNames[channel] = ret.skeleton.bone_names[channel];
+		}
+
+		for (size_t channel = 0; channel < outChannels.size(); channel++) {
+			auto& targetNode = model.nodes[animation.channels[channel].target_node];
+			auto& sampler = animation.samplers[animation.channels[channel].sampler];
+
+			StringHash targetNodeName = CRC::crc64(targetNode.name);
+
+			size_t outChannel = 0;
+
+			for (size_t name = 0; name < outChannelNames.size(); name++) {
+				if (outChannelNames[name] == targetNodeName) {
+					outChannel = name;
+					break;
+				}
+			}
+
+			auto& inAccessor = model.accessors[sampler.input];
+			auto& outAccessor = model.accessors[sampler.output];
+
+			auto timeAccessor = tinygltf_accessor_convert<float>(model, inAccessor);
+			auto translationAccessor = tinygltf_accessor_convert<glm::vec3>(model, outAccessor);
+			auto rotationAccessor = tinygltf_accessor_convert<glm::quat>(model, outAccessor);
+			auto scaleAccessor = tinygltf_accessor_convert<glm::vec3>(model, outAccessor);
+			auto weightAccessor = tinygltf_accessor_convert<float>(model, outAccessor);
+
+			if (outChannels[outChannel].time_points.empty()) {
+				outChannels[outChannel].time_points.resize(timeAccessor.element_count);
+				outChannels[outChannel].keyframes.resize(timeAccessor.element_count);
+			}
+
+			const auto& targetPath = animation.channels[channel].target_path;
+
+			for (size_t keyframe = 0; keyframe < timeAccessor.element_count; keyframe++) {
+				int64_t timePoint = static_cast<int64_t>(timeAccessor[keyframe] * 1000.0f);
+				outChannels[outChannel].time_points[keyframe] = std::chrono::milliseconds(timePoint);
+
+				if (targetPath == "translation") {
+					glm::vec3 outPos = translationAccessor[keyframe];
+					outChannels[outChannel].keyframes[keyframe].position = outPos;
+				}
+				else if (targetPath == "rotation") {
+					glm::quat outRot = rotationAccessor[keyframe];
+					outChannels[outChannel].keyframes[keyframe].rotation = outRot;
+				}
+				else if (targetPath == "scale") {
+					glm::vec3 outScale = scaleAccessor[keyframe];
+					outChannels[outChannel].keyframes[keyframe].scale = outScale;
+
+				}
+				else if (targetPath == "weights") {
+					float outWeight = weightAccessor[keyframe];
+					outChannels[outChannel].keyframes[keyframe].weight = outWeight;
+				}
+			}
+		}
+
+		for (size_t channel = 0; channel < outChannels.size(); channel++) {
+			ret.skeleton.animations[i].add_channel(outChannels[channel], outChannelNames[channel]);
+		}
+
+		ret.skeleton.animation_names[i] = CRC::crc64(animation.name);
 	}
 
 	// Texture/Material data
@@ -335,12 +481,12 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 				}) : std::nullopt;
 		ret.materials[i].normal = (normal_index > -1) ?
 			std::optional<Texture>({
-				tinygltf_image_convert(model.images[model.textures[normal_index].source]),
+					tinygltf_image_convert(model.images[model.textures[normal_index].source]),
 					tinygltf_sampler_convert(model.samplers[model.textures[normal_index].sampler])
 				}) : std::nullopt;
 		ret.materials[i].metallic_roughness = (metallic_roughness_index > -1) ?
 			std::optional<Texture>({
-				tinygltf_image_convert(model.images[model.textures[metallic_roughness_index].source]),
+					tinygltf_image_convert(model.images[model.textures[metallic_roughness_index].source]),
 					tinygltf_sampler_convert(model.samplers[model.textures[metallic_roughness_index].sampler])
 				}) : std::nullopt;
 
