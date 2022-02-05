@@ -3,6 +3,10 @@
 #include <glm/gtx/compatibility.hpp>
 
 Keyframe Channel::sample(std::chrono::milliseconds time) {
+	if (time > time_points.back()) {
+		return keyframes.back();
+	}
+
 	std::chrono::milliseconds timepointA;
 	std::chrono::milliseconds timepointB;
 	

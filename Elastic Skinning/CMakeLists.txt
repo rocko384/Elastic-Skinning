@@ -28,7 +28,9 @@ set(SOURCE
 	"include/model.h"
 	"include/skeleton.h"
 	"include/animation.h"
- "source/animation.cpp")
+	"source/animation.cpp"
+	"source/skeleton.cpp"
+)
 
 file(GLOB
 	SHADERS

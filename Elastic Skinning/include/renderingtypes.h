@@ -12,80 +12,32 @@
 #include <concepts>
 #include <type_traits>
 
+template <typename GLM_T>
+struct VkFormatType {
+	static constexpr vk::Format format() {
+		if constexpr (std::is_same_v<GLM_T, glm::vec2>) {
+			return vk::Format::eR32G32Sfloat;
+		}
+
+		if constexpr (std::is_same_v<GLM_T, glm::vec3>) {
+			return vk::Format::eR32G32B32Sfloat;
+		}
+
+		if constexpr (std::is_same_v<GLM_T, glm::vec4>) {
+			return vk::Format::eR32G32B32A32Sfloat;
+		}
+
+		if constexpr (std::is_same_v<GLM_T, glm::u16vec4>) {
+			return vk::Format::eR16G16B16A16Uint;
+		}
+		
+		return vk::Format::eUndefined;
+	};
+};
+
 enum class RenderTarget {
 	Swapchain,
 	DepthBuffer
-};
-
-struct ModelTransform {
-	glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
-	glm::vec3 position{ 0.0f, 0.0f, 0.0f };
-	glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
-};
-
-template <typename T>
-concept VertexType =
-	std::is_trivial_v<T> &&
-	std::is_standard_layout_v<T> &&
-	requires {
-		{T::binding_description()} -> std::same_as<vk::VertexInputBindingDescription>;
-		{T::attribute_description()} -> ArrayType;
-		{T::attribute_description()[0]} -> std::same_as<vk::VertexInputAttributeDescription&>;
-	};
-
-struct Vertex {
-	glm::vec3 position;
-	glm::vec3 normal;
-	glm::vec3 color;
-	glm::vec2 texcoords;
-	glm::u16vec4 joints;
-	glm::vec4 weights;
-
-	static vk::VertexInputBindingDescription binding_description() {
-		vk::VertexInputBindingDescription retval;
-
-		retval.binding = 0;
-		retval.stride = sizeof(Vertex);
-		retval.inputRate = vk::VertexInputRate::eVertex;
-
-		return retval;
-	}
-
-	static std::array<vk::VertexInputAttributeDescription, 6> attribute_description() {
-		std::array<vk::VertexInputAttributeDescription, 6> retval;
-
-		retval[0].binding = 0;
-		retval[0].location = 0;
-		retval[0].format = vk::Format::eR32G32B32Sfloat;
-		retval[0].offset = offsetof(Vertex, position);
-
-		retval[1].binding = 0;
-		retval[1].location = 1;
-		retval[1].format = vk::Format::eR32G32B32Sfloat;
-		retval[1].offset = offsetof(Vertex, normal);
-
-		retval[2].binding = 0;
-		retval[2].location = 2;
-		retval[2].format = vk::Format::eR32G32B32Sfloat;
-		retval[2].offset = offsetof(Vertex, color);
-
-		retval[3].binding = 0;
-		retval[3].location = 3;
-		retval[3].format = vk::Format::eR32G32Sfloat;
-		retval[3].offset = offsetof(Vertex, texcoords);
-
-		retval[4].binding = 0;
-		retval[4].location = 4;
-		retval[4].format = vk::Format::eR16G16B16A16Uint;
-		retval[4].offset = offsetof(Vertex, joints);
-
-		retval[5].binding = 0;
-		retval[5].location = 5;
-		retval[5].format = vk::Format::eR32G32B32A32Sfloat;
-		retval[5].offset = offsetof(Vertex, weights);
-
-		return retval;
-	}
 };
 
 struct Image {

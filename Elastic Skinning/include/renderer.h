@@ -60,6 +60,7 @@ public:
 	Error set_default_texture(const Image& Image);
 
 	Retval<MeshId, Error> digest_mesh(Mesh Mesh, ModelTransform* Transform);
+	Retval<MeshId, Error> digest_mesh(SkeletalMesh Mesh, ModelTransform* Transform);
 	Retval<ModelId, Error> digest_model(Model Model, ModelTransform* Transform);
 
 	void set_camera(Camera* Camera);
@@ -79,6 +80,7 @@ protected:
 
 	void update_frame_data(Swapchain::FrameId ImageIdx);
 
+	Retval<MeshId, Error> digest_mesh_impl(const std::string& MaterialName, size_t VertexCount, size_t VertexSizeBytes, size_t IndexCount, size_t IndexSizeBytes, void* VertexData, void* IndexData, ModelTransform* Transform);
 	void finish_mesh_digestion();
 
 	void record_command_buffers();

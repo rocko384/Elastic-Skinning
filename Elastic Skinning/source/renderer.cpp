@@ -306,42 +306,42 @@ RendererImpl::Error RendererImpl::set_default_texture(const Image& Image) {
 	return register_texture(DEFAULT_TEXTURE_NAME, Image);
 }
 
-Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
-	StringHash MaterialName = Mesh.material_name.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(Mesh.material_name);
+Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh_impl(const std::string& MaterialName, size_t VertexCount, size_t VertexSizeBytes, size_t IndexCount, size_t IndexSizeBytes, void* VertexData, void* IndexData, ModelTransform* Transform) {
+	StringHash MaterialHash = MaterialName.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(MaterialName);
 
-	if (!materials.contains(MaterialName)) {
+	if (!materials.contains(MaterialHash)) {
 		return { {}, RendererImpl::Error::MATERIAL_NOT_FOUND };
 	}
-	
-	InternalMaterial& material = materials[MaterialName];
+
+	InternalMaterial& material = materials[MaterialHash];
 
 	InternalMesh digestedMesh;
 	digestedMesh.pipeline_hash = material.pipeline_name;
 	digestedMesh.depth_pipeline_hash = hash_combine(digestedMesh.pipeline_hash, RendererImpl::DEPTH_PIPELINE_NAME);
-	digestedMesh.material_hash = MaterialName;
+	digestedMesh.material_hash = MaterialHash;
 
-	digestedMesh.vertex_count = Mesh.vertices.size();
-	digestedMesh.index_count = Mesh.indices.size();
+	digestedMesh.vertex_count = VertexCount;
+	digestedMesh.index_count = IndexCount;
 
 	/*
 	* Create and allocate GPU buffer for vertices
 	*/
-	size_t vertexMemorySize = sizeof(Mesh::VertexType) * Mesh.vertices.size();
+	size_t vertexMemorySize = VertexSizeBytes * VertexCount;
 
 	digestedMesh.vertex_buffer = context->create_vertex_buffer(vertexMemorySize);
 
 	/*
 	* Create and allocate GPU buffer for indices
 	*/
-	size_t indexMemorySize = sizeof(Mesh::IndexType) * Mesh.indices.size();
+	size_t indexMemorySize = IndexSizeBytes * IndexCount;
 
 	digestedMesh.index_buffer = context->create_index_buffer(indexMemorySize);
 
 	/*
 	* Upload data to GPU
 	*/
-	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, Mesh.vertices.data(), vertexMemorySize);
-	context->upload_to_gpu_buffer(digestedMesh.index_buffer, Mesh.indices.data(), indexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, VertexData, vertexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.index_buffer, IndexData, indexMemorySize);
 
 	/*
 	* Allocate command buffers
@@ -357,13 +357,29 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh
 	return { static_cast<MeshId>(meshes.size() - 1), Error::OK };
 }
 
+Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
+	return digest_mesh_impl(Mesh.material_name, Mesh.vertices.size(), sizeof(Mesh::VertexType), Mesh.indices.size(), sizeof(Mesh::IndexType), Mesh.vertices.data(), Mesh.indices.data(), Transform);
+}
+
+Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(SkeletalMesh Mesh, ModelTransform* Transform) {
+	return digest_mesh_impl(Mesh.material_name, Mesh.vertices.size(), sizeof(SkeletalMesh::VertexType), Mesh.indices.size(), sizeof(SkeletalMesh::IndexType), Mesh.vertices.data(), Mesh.indices.data(), Transform);
+}
+
 Retval<RendererImpl::ModelId, RendererImpl::Error> RendererImpl::digest_model(Model Model, ModelTransform* Transform) {
 	for (auto& material : Model.materials) {
 		register_material(material);
 	}
 
 	for (auto& mesh : Model.meshes) {
-		digest_mesh(mesh, Transform);
+		auto* meshptr = std::get_if<Mesh>(&mesh);
+		auto* skelmeshptr = std::get_if<SkeletalMesh>(&mesh);
+
+		if (meshptr != nullptr) {
+			digest_mesh(*meshptr, Transform);
+		}
+		else if (skelmeshptr != nullptr) {
+			digest_mesh(*skelmeshptr, Transform);
+		}
 	}
 
 	return { 0, Error::OK };

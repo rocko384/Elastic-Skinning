@@ -220,7 +220,14 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 	// Mesh data
 	for (auto& node : model.nodes) {
 		if (node.mesh > -1) {
-			Mesh outMesh;
+			std::variant<Mesh, SkeletalMesh> outMesh;
+
+			if (node.skin > -1) {
+				outMesh = SkeletalMesh();
+			}
+			else {
+				outMesh = Mesh();
+			}
 
 			auto& mesh = model.meshes[node.mesh];
 			auto& primitive = mesh.primitives[0];
@@ -302,45 +309,55 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 			}
 
 			size_t index_count = std::visit([](auto&& accessor) { return accessor.element_count; }, index_accessor);
-			outMesh.vertices.resize(position_accessor.element_count);
-			outMesh.indices.resize(index_count);
+			
+			std::visit([&model, &primitive, &index_count, &position_accessor, &normal_accessor, &color_accessor, &texcoord_accessor, &index_accessor](auto&& meshref) {
+				meshref.vertices.resize(position_accessor.element_count);
+				meshref.indices.resize(index_count);
 
-			for (size_t vertex = 0; vertex < position_accessor.element_count; vertex++) {
-				outMesh.vertices[vertex].position = position_accessor[vertex];
+				for (size_t vertex = 0; vertex < position_accessor.element_count; vertex++) {
+					meshref.vertices[vertex].position = position_accessor[vertex];
 
-				outMesh.vertices[vertex].normal = !normal_accessor.empty() ?
-					normal_accessor[vertex] : glm::vec3{ 0.0f, 0.0f, 0.0f };
+					meshref.vertices[vertex].normal = !normal_accessor.empty() ?
+						normal_accessor[vertex] : glm::vec3{ 0.0f, 0.0f, 0.0f };
 
-				outMesh.vertices[vertex].color = !color_accessor.empty() ?
-					color_accessor[vertex] : glm::vec3{ 1.0f, 1.0f, 1.0f };
+					meshref.vertices[vertex].color = !color_accessor.empty() ?
+						color_accessor[vertex] : glm::vec3{ 1.0f, 1.0f, 1.0f };
 
-				outMesh.vertices[vertex].texcoords = !texcoord_accessor.empty() ?
-					texcoord_accessor[vertex] : glm::vec2{ 0.0f, 0.0f };
+					meshref.vertices[vertex].texcoords = !texcoord_accessor.empty() ?
+						texcoord_accessor[vertex] : glm::vec2{ 0.0f, 0.0f };
 
-				bool is_joints_accessor_empty = std::visit([](auto&& accessor) {
-					return accessor.empty();
+				}
+
+				std::visit([&meshref](auto&& accessor) {
+					for (size_t index = 0; index < accessor.element_count; index++) {
+						meshref.indices[index] = accessor[index];
+					}
+					}, index_accessor);
+
+				meshref.material_name = model.materials[primitive.material].name;
+			}, outMesh);
+
+			auto* meshptr = std::get_if<SkeletalMesh>(&outMesh);
+
+			if (meshptr != nullptr) {
+				for (size_t vertex = 0; vertex < position_accessor.element_count; vertex++) {
+					bool is_joints_accessor_empty = std::visit([](auto&& accessor) {
+						return accessor.empty();
 					}, joints_accessor);
 
-				if (!is_joints_accessor_empty) {
-					std::visit([&outMesh, vertex](auto&& accessor) {
-						outMesh.vertices[vertex].joints = accessor[vertex];
+					if (!is_joints_accessor_empty) {
+						std::visit([meshptr, vertex](auto&& accessor) {
+							meshptr->vertices[vertex].joints = accessor[vertex];
 						}, joints_accessor);
-				}
-				else {
-					outMesh.vertices[vertex].joints = glm::u16vec4{ 0, 0, 0, 0 };
-				}
+					}
+					else {
+						meshptr->vertices[vertex].joints = glm::u16vec4{ 0, 0, 0, 0 };
+					}
 
-				outMesh.vertices[vertex].weights = !weights_accessor.empty() ?
-					weights_accessor[vertex] : glm::vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+					meshptr->vertices[vertex].weights = !weights_accessor.empty() ?
+						weights_accessor[vertex] : glm::vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+				}
 			}
-
-			std::visit([&outMesh](auto&& accessor) {
-				for (size_t index = 0; index < accessor.element_count; index++) {
-					outMesh.indices[index] = accessor[index];
-				}
-			}, index_accessor);
-
-			outMesh.material_name = model.materials[primitive.material].name;
 
 			ret.meshes.push_back(outMesh);
 
@@ -349,52 +366,48 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 				auto& skin = model.skins[node.skin];
 				auto matrix_accessor = tinygltf_accessor_convert<glm::mat4>(model, model.accessors[skin.inverseBindMatrices]);
 
-				ret.skeleton.bones.resize(skin.joints.size());
-				ret.skeleton.bone_names.resize(skin.joints.size());
-
-				for (size_t i = 0; i < ret.skeleton.bones.size(); i++) {
+				for (size_t i = 0; i < skin.joints.size(); i++) {
 					auto& joint = model.nodes[skin.joints[i]];
 
-					ret.skeleton.bones[i].inverse_bind_matrix = matrix_accessor[i];
+					Bone outBone;
+
+					outBone.inverse_bind_matrix = matrix_accessor[i];
 
 					bool has_rotation = joint.rotation.size() != 0;
 					bool has_position = joint.translation.size() != 0;
 					bool has_scale = joint.scale.size() != 0;
 
-					ret.skeleton.bones[i].rotation = has_rotation ?
+					outBone.rotation = has_rotation ?
 						glm::quat{
 							static_cast<float>(joint.rotation[0]),
 							static_cast<float>(joint.rotation[1]),
 							static_cast<float>(joint.rotation[2]),
 							static_cast<float>(joint.rotation[3])
-								} : glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f };
+						} : glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f };
 
-					ret.skeleton.bones[i].position = has_position ?
+					outBone.position = has_position ?
 						glm::vec3{
 							static_cast<float>(joint.translation[0]),
 							static_cast<float>(joint.translation[1]),
 							static_cast<float>(joint.translation[2])
-								} : glm::vec3{ 0.0f, 0.0f, 0.0f };
+						} : glm::vec3{ 0.0f, 0.0f, 0.0f };
 
-					ret.skeleton.bones[i].scale = has_scale ?
+					outBone.scale = has_scale ?
 						glm::vec3{
 							static_cast<float>(joint.rotation[0]),
 							static_cast<float>(joint.rotation[1]),
 							static_cast<float>(joint.rotation[2])
 						} : glm::vec3{ 1.0f, 1.0f, 1.0f };
 
-					ret.skeleton.bone_names[i] = CRC::crc64(joint.name);
+					ret.skeleton.add_bone(outBone, joint.name);
 				}
 			}
 		}
 	}
 
 	// Animation data
-	ret.skeleton.animations.resize(model.animations.size());
-	ret.skeleton.animation_names.resize(model.animations.size());
-
-	for (size_t i = 0; i < ret.skeleton.animations.size(); i++) {
-		auto& animation = model.animations[i];
+	for (auto& animation : model.animations) {
+		Animation outAnimation;
 
 		std::vector<Channel> outChannels(ret.skeleton.bones.size());
 		std::vector<StringHash> outChannelNames(ret.skeleton.bones.size());
@@ -459,10 +472,10 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 		}
 
 		for (size_t channel = 0; channel < outChannels.size(); channel++) {
-			ret.skeleton.animations[i].add_channel(outChannels[channel], outChannelNames[channel]);
+			outAnimation.add_channel(outChannels[channel], outChannelNames[channel]);
 		}
 
-		ret.skeleton.animation_names[i] = CRC::crc64(animation.name);
+		ret.skeleton.add_animation(outAnimation, animation.name);
 	}
 
 	// Texture/Material data
@@ -501,7 +514,14 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 		ret.materials[i].roughness_factor = static_cast<float>(material.pbrMetallicRoughness.roughnessFactor);
 
 		ret.materials[i].name = material.name;
-		ret.materials[i].pipeline_name = "base"; /// TODO: Figure out a decent way of deducing / specifying this
+
+		/// TODO: Figure out a decent way of deducing / specifying this
+		if (ret.skeleton.bones.empty()) {
+			ret.materials[i].pipeline_name = "base";
+		}
+		else {
+			ret.materials[i].pipeline_name = "baseskel";
+		}
 	}
 
 	return {
