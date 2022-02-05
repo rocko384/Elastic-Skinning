@@ -62,28 +62,6 @@ struct Vertex {
 		DESCRIPTION(retval, color);
 		DESCRIPTION(retval, texcoords);
 
-		/*
-		retval[0].binding = 0;
-		retval[0].location = 0;
-		retval[0].format = vk::Format::eR32G32B32Sfloat;
-		retval[0].offset = offsetof(Vertex, position);
-
-		retval[1].binding = 0;
-		retval[1].location = 1;
-		retval[1].format = vk::Format::eR32G32B32Sfloat;
-		retval[1].offset = offsetof(Vertex, normal);
-
-		retval[2].binding = 0;
-		retval[2].location = 2;
-		retval[2].format = vk::Format::eR32G32B32Sfloat;
-		retval[2].offset = offsetof(Vertex, color);
-
-		retval[3].binding = 0;
-		retval[3].location = 3;
-		retval[3].format = vk::Format::eR32G32Sfloat;
-		retval[3].offset = offsetof(Vertex, texcoords);
-		*/
-
 		return retval;
 	}
 };
@@ -109,39 +87,20 @@ struct SkeletalVertex {
 	static std::array<vk::VertexInputAttributeDescription, 6> attribute_description() {
 		std::array<vk::VertexInputAttributeDescription, 6> retval;
 
-		retval[0].binding = 0;
-		retval[0].location = 0;
-		retval[0].format = vk::Format::eR32G32B32Sfloat;
-		retval[0].offset = offsetof(SkeletalVertex, position);
-
-		retval[1].binding = 0;
-		retval[1].location = 1;
-		retval[1].format = vk::Format::eR32G32B32Sfloat;
-		retval[1].offset = offsetof(SkeletalVertex, normal);
-
-		retval[2].binding = 0;
-		retval[2].location = 2;
-		retval[2].format = vk::Format::eR32G32B32Sfloat;
-		retval[2].offset = offsetof(SkeletalVertex, color);
-
-		retval[3].binding = 0;
-		retval[3].location = 3;
-		retval[3].format = vk::Format::eR32G32Sfloat;
-		retval[3].offset = offsetof(SkeletalVertex, texcoords);
-
-		retval[4].binding = 0;
-		retval[4].location = 4;
-		retval[4].format = vk::Format::eR16G16B16A16Uint;
-		retval[4].offset = offsetof(SkeletalVertex, joints);
-
-		retval[5].binding = 0;
-		retval[5].location = 5;
-		retval[5].format = vk::Format::eR32G32B32A32Sfloat;
-		retval[5].offset = offsetof(SkeletalVertex, weights);
+		BEGIN_DESCRIPTIONS(SkeletalVertex);
+		DESCRIPTION(retval, position);
+		DESCRIPTION(retval, normal);
+		DESCRIPTION(retval, color);
+		DESCRIPTION(retval, texcoords);
+		DESCRIPTION(retval, joints);
+		DESCRIPTION(retval, weights);
 
 		return retval;
 	}
 };
+
+#undef BEGIN_DESCRIPTIONS
+#undef DESCRIPTION
 
 template <typename T>
 concept MeshType =
