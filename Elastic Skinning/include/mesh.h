@@ -28,20 +28,26 @@ std::is_standard_layout_v<T> &&
 };
 
 #define BEGIN_DESCRIPTIONS(T) \
-using _Desc_Parent_T = T; \
-size_t _desc_index = 0
-#define DESCRIPTION(Out, Member) \
-	Out[_desc_index].binding = 0; \
-	Out[_desc_index].location = _desc_index; \
-	Out[_desc_index].format = VkFormatType<decltype(Member)>::format(); \
-	Out[_desc_index].offset = offsetof(_Desc_Parent_T, Member); \
+	using _Desc_Parent_T = T; \
+	size_t _desc_index = 0; \
+	std::vector<vk::VertexInputAttributeDescription> _ret_val
+
+#define DESCRIPTION(Member) \
+	_ret_val.push_back({}); \
+	_ret_val[_desc_index].binding = 0; \
+	_ret_val[_desc_index].location = _desc_index; \
+	_ret_val[_desc_index].format = VkFormatType<decltype(Member)>::format(); \
+	_ret_val[_desc_index].offset = offsetof(_Desc_Parent_T, Member); \
 	_desc_index++
 
+#define END_DESCRIPTIONS(_) \
+	return _ret_val
+
 struct Vertex {
-	glm::vec3 position;
-	glm::vec3 normal;
-	glm::vec3 color;
-	glm::vec2 texcoords;
+	alignas(16) glm::vec3 position;
+	alignas(16) glm::vec3 normal;
+	alignas(16) glm::vec3 color;
+	alignas(16) glm::vec2 texcoords;
 
 	static vk::VertexInputBindingDescription binding_description() {
 		vk::VertexInputBindingDescription retval;
@@ -53,26 +59,23 @@ struct Vertex {
 		return retval;
 	}
 
-	static std::array<vk::VertexInputAttributeDescription, 4> attribute_description() {
-		std::array<vk::VertexInputAttributeDescription, 4> retval;
-
+	static std::vector<vk::VertexInputAttributeDescription> attribute_description() {
 		BEGIN_DESCRIPTIONS(Vertex);
-		DESCRIPTION(retval, position);
-		DESCRIPTION(retval, normal);
-		DESCRIPTION(retval, color);
-		DESCRIPTION(retval, texcoords);
-
-		return retval;
+		DESCRIPTION(position);
+		DESCRIPTION(normal);
+		DESCRIPTION(color);
+		DESCRIPTION(texcoords);
+		END_DESCRIPTIONS();
 	}
 };
 
 struct SkeletalVertex {
-	glm::vec3 position;
-	glm::vec3 normal;
-	glm::vec3 color;
-	glm::vec2 texcoords;
-	glm::u16vec4 joints;
-	glm::vec4 weights;
+	alignas(16) glm::uvec4 joints;
+	alignas(16) glm::vec4 weights;
+	alignas(16) glm::vec3 position;
+	alignas(16) glm::vec3 normal;
+	alignas(16) glm::vec3 color;
+	alignas(16) glm::vec2 texcoords;
 
 	static vk::VertexInputBindingDescription binding_description() {
 		vk::VertexInputBindingDescription retval;
@@ -84,23 +87,65 @@ struct SkeletalVertex {
 		return retval;
 	}
 
-	static std::array<vk::VertexInputAttributeDescription, 6> attribute_description() {
-		std::array<vk::VertexInputAttributeDescription, 6> retval;
-
+	static std::vector<vk::VertexInputAttributeDescription> attribute_description() {
 		BEGIN_DESCRIPTIONS(SkeletalVertex);
-		DESCRIPTION(retval, position);
-		DESCRIPTION(retval, normal);
-		DESCRIPTION(retval, color);
-		DESCRIPTION(retval, texcoords);
-		DESCRIPTION(retval, joints);
-		DESCRIPTION(retval, weights);
-
-		return retval;
+		DESCRIPTION(joints);
+		DESCRIPTION(weights);
+		DESCRIPTION(position);
+		DESCRIPTION(normal);
+		DESCRIPTION(color);
+		DESCRIPTION(texcoords);
+		END_DESCRIPTIONS();
 	}
 };
 
 #undef BEGIN_DESCRIPTIONS
 #undef DESCRIPTION
+#undef END_DESCRIPTIONS
+
+struct SkinningContext {
+	uint32_t vertex_count;
+};
+
+struct SkeletalVertexBuffer {
+	SkeletalVertex vertex;
+
+	static constexpr StringHash name() {
+		return CRC::crc64("SkeletalVertex");
+	}
+
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
+		vk::DescriptorSetLayoutBinding retval;
+
+		retval.binding = 0;
+		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
+		retval.descriptorCount = 1;
+		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
+		retval.pImmutableSamplers = nullptr;
+
+		return retval;
+	}
+};
+
+struct VertexBuffer {
+	Vertex vertex;
+
+	static constexpr StringHash name() {
+		return CRC::crc64("Vertex");
+	}
+
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
+		vk::DescriptorSetLayoutBinding retval;
+
+		retval.binding = 1;
+		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
+		retval.descriptorCount = 1;
+		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
+		retval.pImmutableSamplers = nullptr;
+
+		return retval;
+	}
+};
 
 template <typename T>
 concept MeshType =

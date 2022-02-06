@@ -5,6 +5,7 @@
 #include "swapchain.h"
 #include "renderingtypes.h"
 #include "gfxpipeline.h"
+#include "computepipeline.h"
 #include "mesh.h"
 
 #include <vulkan/vulkan.hpp>
@@ -80,7 +81,6 @@ protected:
 
 	void update_frame_data(Swapchain::FrameId ImageIdx);
 
-	Retval<MeshId, Error> digest_mesh_impl(const std::string& MaterialName, size_t VertexCount, size_t VertexSizeBytes, size_t IndexCount, size_t IndexSizeBytes, void* VertexData, void* IndexData, ModelTransform* Transform);
 	void finish_mesh_digestion();
 
 	void record_command_buffers();
@@ -166,6 +166,22 @@ protected:
 
 	std::vector<InternalMesh> meshes;
 	std::vector<ModelTransform*> mesh_transforms;
+
+	struct InternalSkeletalMesh {
+		BufferAllocation vertex_source_buffer;
+		std::vector<BufferAllocation> vertex_out_buffers;
+
+		std::vector<vk::DescriptorSet> skinning_descriptor_sets;
+
+
+		size_t vertex_count{ 0 };
+
+		MeshId out_mesh_id{ 0 };
+	};
+
+	std::vector<InternalSkeletalMesh> skeletal_meshes;
+
+	ComputePipeline<SkinningContext, VertexBuffer, SkeletalVertexBuffer> skinning_pipeline;
 
 	Camera* current_camera{ nullptr };
 

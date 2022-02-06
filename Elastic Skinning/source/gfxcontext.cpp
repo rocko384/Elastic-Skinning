@@ -475,6 +475,15 @@ BufferAllocation GfxContext::create_storage_buffer(vk::DeviceSize Size) {
 	);
 }
 
+BufferAllocation GfxContext::create_gpu_storage_buffer(vk::DeviceSize Size) {
+	return create_buffer(
+		Size,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
+		vk::SharingMode::eExclusive,
+		VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY
+	);
+}
+
 BufferAllocation GfxContext::create_buffer(vk::DeviceSize Size, vk::BufferUsageFlags Usage, vk::SharingMode SharingMode, VmaMemoryUsage Locality) {
 	VkBufferCreateInfo bufferInfo{};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;

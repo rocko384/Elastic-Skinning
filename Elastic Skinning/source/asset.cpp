@@ -416,7 +416,7 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 			outChannelNames[channel] = ret.skeleton.bone_names[channel];
 		}
 
-		for (size_t channel = 0; channel < outChannels.size(); channel++) {
+		for (size_t channel = 0; channel < animation.channels.size(); channel++) {
 			auto& targetNode = model.nodes[animation.channels[channel].target_node];
 			auto& sampler = animation.samplers[animation.channels[channel].sampler];
 
@@ -516,12 +516,7 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 		ret.materials[i].name = material.name;
 
 		/// TODO: Figure out a decent way of deducing / specifying this
-		if (ret.skeleton.bones.empty()) {
-			ret.materials[i].pipeline_name = "base";
-		}
-		else {
-			ret.materials[i].pipeline_name = "baseskel";
-		}
+		ret.materials[i].pipeline_name = "base";
 	}
 
 	return {

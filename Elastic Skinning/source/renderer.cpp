@@ -104,6 +104,18 @@ void RendererImpl::constructor_impl(GfxContext* Context) {
 	texture_sampler = context->primary_logical_device.createSampler(samplerInfo);
 
 	/*
+	* Skinning compute kernel init
+	*/
+
+	skinning_pipeline.shader_path = "shaders/elastic.comp.bin";
+	ComputePipelineImpl::Error skinningError = skinning_pipeline.init(context);
+
+	if (skinningError != ComputePipelineImpl::Error::OK) {
+		LOG_ERROR("Failed to initialize skinning kernel");
+		return;
+	}
+
+	/*
 	* Finish initialization
 	*/
 
@@ -128,7 +140,17 @@ RendererImpl::~RendererImpl() {
 			context->destroy_buffer(mesh.index_buffer);
 		}
 
+		for (auto& mesh : skeletal_meshes) {
+			context->destroy_buffer(mesh.vertex_source_buffer);
+
+			for (auto& buf : mesh.vertex_out_buffers) {
+				context->destroy_buffer(buf);
+			}
+		}
+
 		context->primary_logical_device.destroy(command_pool);
+
+		skinning_pipeline.deinit();
 
 		for (auto& pipeline : pipelines) {
 			pipeline.second.deinit();
@@ -149,7 +171,7 @@ RendererImpl::Error RendererImpl::register_pipeline_impl(StringHash Name, GfxPip
 		return Error::PIPELINE_WITH_NAME_ALREADY_EXISTS;
 	}
 
-	pipelines[Name] = std::move(Pipeline);
+	pipelines.emplace(Name, std::move(Pipeline));
 	pipelines[Name].deinit();
 
 	GfxPipelineImpl::Error pipelineError;
@@ -306,8 +328,8 @@ RendererImpl::Error RendererImpl::set_default_texture(const Image& Image) {
 	return register_texture(DEFAULT_TEXTURE_NAME, Image);
 }
 
-Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh_impl(const std::string& MaterialName, size_t VertexCount, size_t VertexSizeBytes, size_t IndexCount, size_t IndexSizeBytes, void* VertexData, void* IndexData, ModelTransform* Transform) {
-	StringHash MaterialHash = MaterialName.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(MaterialName);
+Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
+	StringHash MaterialHash = Mesh.material_name.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(Mesh.material_name);
 
 	if (!materials.contains(MaterialHash)) {
 		return { {}, RendererImpl::Error::MATERIAL_NOT_FOUND };
@@ -320,36 +342,28 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh_impl
 	digestedMesh.depth_pipeline_hash = hash_combine(digestedMesh.pipeline_hash, RendererImpl::DEPTH_PIPELINE_NAME);
 	digestedMesh.material_hash = MaterialHash;
 
-	digestedMesh.vertex_count = VertexCount;
-	digestedMesh.index_count = IndexCount;
+	digestedMesh.vertex_count = Mesh.vertices.size();
+	digestedMesh.index_count = Mesh.indices.size();
 
 	/*
 	* Create and allocate GPU buffer for vertices
 	*/
-	size_t vertexMemorySize = VertexSizeBytes * VertexCount;
+	size_t vertexMemorySize = sizeof(Vertex) * Mesh.vertices.size();
 
 	digestedMesh.vertex_buffer = context->create_vertex_buffer(vertexMemorySize);
 
 	/*
 	* Create and allocate GPU buffer for indices
 	*/
-	size_t indexMemorySize = IndexSizeBytes * IndexCount;
+	size_t indexMemorySize = sizeof(uint32_t) * Mesh.indices.size();
 
 	digestedMesh.index_buffer = context->create_index_buffer(indexMemorySize);
 
 	/*
 	* Upload data to GPU
 	*/
-	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, VertexData, vertexMemorySize);
-	context->upload_to_gpu_buffer(digestedMesh.index_buffer, IndexData, indexMemorySize);
-
-	/*
-	* Allocate command buffers
-	*/
-	vk::CommandBufferAllocateInfo commandBufferInfo;
-	commandBufferInfo.commandPool = command_pool;
-	commandBufferInfo.level = vk::CommandBufferLevel::eSecondary;
-	commandBufferInfo.commandBufferCount = 1;
+	context->upload_to_gpu_buffer(digestedMesh.vertex_buffer, Mesh.vertices.data(), vertexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.index_buffer, Mesh.indices.data(), indexMemorySize);
 
 	mesh_transforms.push_back(Transform);
 	meshes.push_back(digestedMesh);
@@ -357,12 +371,77 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh_impl
 	return { static_cast<MeshId>(meshes.size() - 1), Error::OK };
 }
 
-Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
-	return digest_mesh_impl(Mesh.material_name, Mesh.vertices.size(), sizeof(Mesh::VertexType), Mesh.indices.size(), sizeof(Mesh::IndexType), Mesh.vertices.data(), Mesh.indices.data(), Transform);
-}
-
 Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(SkeletalMesh Mesh, ModelTransform* Transform) {
-	return digest_mesh_impl(Mesh.material_name, Mesh.vertices.size(), sizeof(SkeletalMesh::VertexType), Mesh.indices.size(), sizeof(SkeletalMesh::IndexType), Mesh.vertices.data(), Mesh.indices.data(), Transform);
+	StringHash MaterialHash = Mesh.material_name.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(Mesh.material_name);
+
+	if (!materials.contains(MaterialHash)) {
+		return { {}, RendererImpl::Error::MATERIAL_NOT_FOUND };
+	}
+
+	InternalMaterial& material = materials[MaterialHash];
+
+	InternalMesh digestedMesh;
+	digestedMesh.pipeline_hash = material.pipeline_name;
+	digestedMesh.depth_pipeline_hash = hash_combine(digestedMesh.pipeline_hash, RendererImpl::DEPTH_PIPELINE_NAME);
+	digestedMesh.material_hash = MaterialHash;
+
+	digestedMesh.vertex_count = Mesh.vertices.size();
+	digestedMesh.index_count = Mesh.indices.size();
+
+	/*
+	* Create and allocate GPU buffer for vertices
+	*/
+	size_t vertexMemorySize = sizeof(Vertex) * Mesh.vertices.size();
+
+	digestedMesh.vertex_buffer = context->create_vertex_buffer(vertexMemorySize);
+
+	/*
+	* Create and allocate GPU buffer for indices
+	*/
+	size_t indexMemorySize = sizeof(uint32_t) * Mesh.indices.size();
+
+	digestedMesh.index_buffer = context->create_index_buffer(indexMemorySize);
+
+	mesh_transforms.push_back(Transform);
+	meshes.push_back(digestedMesh);
+
+	MeshId staticMeshId = static_cast<MeshId>(meshes.size() - 1);
+
+
+	/*
+	* Prepare source mesh to transform from
+	*/
+	InternalSkeletalMesh digestedSkeletalMesh;
+
+	digestedSkeletalMesh.out_mesh_id = staticMeshId;
+
+	digestedSkeletalMesh.vertex_count = Mesh.vertices.size();
+
+	/*
+	* Create and allocate GPU buffer for skeletal vertices
+	*/
+	size_t skelVertexMemorySize = sizeof(SkeletalVertex) * Mesh.vertices.size();
+
+	digestedSkeletalMesh.vertex_source_buffer = context->create_gpu_storage_buffer(skelVertexMemorySize);
+	
+	/*
+	* Create per frame vertex output buffers
+	*/
+	digestedSkeletalMesh.vertex_out_buffers.resize(render_swapchain.size());
+
+	for (auto& buf : digestedSkeletalMesh.vertex_out_buffers) {
+		buf = context->create_gpu_storage_buffer(vertexMemorySize);
+	}
+
+	/*
+	* Upload data to GPU
+	*/
+	context->upload_to_gpu_buffer(digestedSkeletalMesh.vertex_source_buffer, Mesh.vertices.data(), skelVertexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.index_buffer, Mesh.indices.data(), indexMemorySize);
+
+	skeletal_meshes.push_back(digestedSkeletalMesh);
+
+	return { staticMeshId, Error::OK };
 }
 
 Retval<RendererImpl::ModelId, RendererImpl::Error> RendererImpl::digest_model(Model Model, ModelTransform* Transform) {
@@ -425,7 +504,7 @@ void RendererImpl::draw_frame() {
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = signalSemaphores;
 
-	context->primary_queue.submit({ submitInfo }, frame.value.fence);
+	context->present_queue.submit({ submitInfo }, frame.value.fence);
 
 	if (render_swapchain.present_frame(frame.value) != Swapchain::Error::OK) {
 		LOG_ERROR("Swapchain presentation failure");
@@ -743,13 +822,16 @@ void RendererImpl::finish_mesh_digestion() {
 	numPerMeshBuffers *= pipelines.size();
 	numGlobalBuffers *= pipelines.size();
 
+	uint32_t numSkinningBuffers = render_swapchain.size() * skeletal_meshes.size();
+
 	std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
+		{ vk::DescriptorType::eStorageBuffer, numSkinningBuffers },
 		{ vk::DescriptorType::eStorageBuffer, numPerMeshBuffers },
 		{ vk::DescriptorType::eUniformBuffer, numGlobalBuffers },
 		{ vk::DescriptorType::eCombinedImageSampler, numSamplers }
 	};
 
-	uint32_t totalSets = numPerMeshBuffers + numGlobalBuffers + numSamplers;
+	uint32_t totalSets = numSkinningBuffers + numPerMeshBuffers + numGlobalBuffers + numSamplers;
 
 	vk::DescriptorPoolCreateInfo descriptorPoolInfo;
 	descriptorPoolInfo.poolSizeCount = descriptorPoolSizes.size();
@@ -778,6 +860,18 @@ void RendererImpl::finish_mesh_digestion() {
 			frames[i].buffer_descriptor_sets[pipeline.first] = descriptorSets[i];
 		}
 	}
+	
+	// Allocate skinning descriptor sets
+	for (auto& skelMesh : skeletal_meshes) {
+		std::vector<vk::DescriptorSetLayout> descriptorLayouts(render_swapchain.size(), skinning_pipeline.descriptor_set_layout);
+
+		vk::DescriptorSetAllocateInfo skinningDescriptorSetInfo;
+		skinningDescriptorSetInfo.descriptorPool = descriptor_pool;
+		skinningDescriptorSetInfo.descriptorSetCount = static_cast<uint32_t>(descriptorLayouts.size());
+		skinningDescriptorSetInfo.pSetLayouts = descriptorLayouts.data();
+
+		skelMesh.skinning_descriptor_sets = context->primary_logical_device.allocateDescriptorSets(skinningDescriptorSetInfo);
+	}
 
 	// Allocate texture descriptor sets
 	for (auto& pipeline : pipelines) {
@@ -797,6 +891,63 @@ void RendererImpl::finish_mesh_digestion() {
 	}
 
 	// Populate descriptor sets
+
+	// Skinning descriptor sets
+	for (auto& skelMesh : skeletal_meshes) {
+		std::vector<vk::WriteDescriptorSet> descriptorWrites;
+		std::list<vk::DescriptorBufferInfo> bufferInfos;
+
+		for (size_t i = 0; i < render_swapchain.size(); i++) {
+			// In vertices
+			vk::WriteDescriptorSet sourceBufWrite;
+
+			sourceBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
+			sourceBufWrite.dstBinding = SkeletalVertexBuffer::layout_binding().binding;
+			sourceBufWrite.dstArrayElement = 0;
+			sourceBufWrite.descriptorType = SkeletalVertexBuffer::layout_binding().descriptorType;
+			sourceBufWrite.descriptorCount = SkeletalVertexBuffer::layout_binding().descriptorCount;
+
+			vk::DescriptorBufferInfo sourceBufferInfo;
+
+			sourceBufferInfo.buffer = skelMesh.vertex_source_buffer.buffer;
+			sourceBufferInfo.offset = 0;
+			sourceBufferInfo.range = VK_WHOLE_SIZE;
+
+			bufferInfos.push_back(sourceBufferInfo);
+
+			sourceBufWrite.pBufferInfo = &bufferInfos.back();
+			sourceBufWrite.pImageInfo = nullptr;
+			sourceBufWrite.pTexelBufferView = nullptr;
+
+			descriptorWrites.push_back(sourceBufWrite);
+
+			// Out vertices
+			vk::WriteDescriptorSet outBufWrite;
+
+			outBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
+			outBufWrite.dstBinding = VertexBuffer::layout_binding().binding;
+			outBufWrite.dstArrayElement = 0;
+			outBufWrite.descriptorType = VertexBuffer::layout_binding().descriptorType;
+			outBufWrite.descriptorCount = VertexBuffer::layout_binding().descriptorCount;
+
+			vk::DescriptorBufferInfo outBufferInfo;
+
+			outBufferInfo.buffer = skelMesh.vertex_out_buffers[i].buffer;
+			outBufferInfo.offset = 0;
+			outBufferInfo.range = VK_WHOLE_SIZE;
+
+			bufferInfos.push_back(outBufferInfo);
+
+			outBufWrite.pBufferInfo = &bufferInfos.back();
+			outBufWrite.pImageInfo = nullptr;
+			outBufWrite.pTexelBufferView = nullptr;
+
+			descriptorWrites.push_back(outBufWrite);
+		}
+
+		context->primary_logical_device.updateDescriptorSets(descriptorWrites, nullptr);
+	}
+
 	// Per pipeline
 	for (auto& pipeline : pipelines) {
 		// Per descriptor type used by pipeline
@@ -881,6 +1032,92 @@ void RendererImpl::record_command_buffers() {
 
 		currentCommandBuffer.begin(beginInfo);
 
+		// Skinning for skeletal meshes
+		currentCommandBuffer.bindPipeline(
+			vk::PipelineBindPoint::eCompute,
+			skinning_pipeline.pipeline
+		);
+
+		for (auto& skelMesh : skeletal_meshes) {
+			InternalMesh& targetMesh = meshes[skelMesh.out_mesh_id];
+
+			// Execute skinning kernel
+			{
+				currentCommandBuffer.pushConstants<MeshId>(
+					skinning_pipeline.pipeline_layout,
+					skinning_pipeline.context_push_constant.stageFlags,
+					skinning_pipeline.context_push_constant.offset,
+					static_cast<uint32_t>(skelMesh.vertex_count)
+					);
+
+				std::vector<vk::DescriptorSet> descriptorSets = { skelMesh.skinning_descriptor_sets[i] };
+
+				currentCommandBuffer.bindDescriptorSets(
+					vk::PipelineBindPoint::eCompute,
+					skinning_pipeline.pipeline_layout,
+					0,
+					descriptorSets,
+					nullptr
+				);
+
+				uint32_t groupCount = (skelMesh.vertex_count / 256) + 1;
+
+				currentCommandBuffer.dispatch(groupCount, 1, 1);
+			}
+
+			// Barrier the output buffer
+			{
+				vk::BufferMemoryBarrier barrier;
+				barrier.buffer = skelMesh.vertex_out_buffers[i].buffer;
+				barrier.offset = 0;
+				barrier.size = VK_WHOLE_SIZE;
+				barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+				barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+				barrier.srcQueueFamilyIndex = context->primary_queue_family_index;
+				barrier.dstQueueFamilyIndex = context->primary_queue_family_index;
+
+				currentCommandBuffer.pipelineBarrier(
+					vk::PipelineStageFlagBits::eComputeShader,
+					vk::PipelineStageFlagBits::eTransfer,
+					(vk::DependencyFlagBits)0,
+					nullptr,
+					barrier,
+					nullptr
+				);
+			}
+
+			// Transfer skinned output vertices to the vertex buffers to be rendered
+			{
+				vk::BufferCopy copyRegion;
+				copyRegion.srcOffset = 0;
+				copyRegion.dstOffset = 0;
+				copyRegion.size = skelMesh.vertex_count * sizeof(Vertex);
+
+				currentCommandBuffer.copyBuffer(skelMesh.vertex_out_buffers[i].buffer, targetMesh.vertex_buffer.buffer, copyRegion);
+			}
+
+			// Barrier the rendered buffer
+			{
+				vk::BufferMemoryBarrier barrier;
+				barrier.buffer = targetMesh.vertex_buffer.buffer;
+				barrier.offset = 0;
+				barrier.size = VK_WHOLE_SIZE;
+				barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+				barrier.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead;
+				barrier.srcQueueFamilyIndex = context->primary_queue_family_index;
+				barrier.dstQueueFamilyIndex = context->primary_queue_family_index;
+
+				currentCommandBuffer.pipelineBarrier(
+					vk::PipelineStageFlagBits::eTransfer,
+					vk::PipelineStageFlagBits::eVertexInput,
+					(vk::DependencyFlagBits)0,
+					nullptr,
+					barrier,
+					nullptr
+				);
+			}
+		}
+
 		vk::RenderPassBeginInfo renderPassInfo;
 		renderPassInfo.renderPass = geometry_render_pass;
 		renderPassInfo.framebuffer = frames[i].framebuffer;
@@ -929,7 +1166,7 @@ void RendererImpl::record_command_buffers() {
 				pipeline->mesh_id_push_constant.stageFlags,
 				pipeline->mesh_id_push_constant.offset,
 				meshId
-				);
+			);
 
 			std::array<vk::Buffer, 1> vertexBuffers = { meshes[meshId].vertex_buffer.buffer };
 			std::array<vk::DeviceSize, 1> offsets = { 0 };

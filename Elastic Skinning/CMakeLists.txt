@@ -30,7 +30,7 @@ set(SOURCE
 	"include/animation.h"
 	"source/animation.cpp"
 	"source/skeleton.cpp"
-)
+ "include/computepipeline.h" "source/computepipeline.cpp")
 
 file(GLOB
 	SHADERS

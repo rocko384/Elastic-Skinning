@@ -27,6 +27,10 @@ struct VkFormatType {
 			return vk::Format::eR32G32B32A32Sfloat;
 		}
 
+		if constexpr (std::is_same_v<GLM_T, glm::uvec4>) {
+			return vk::Format::eR32G32B32A32Uint;
+		}
+
 		if constexpr (std::is_same_v<GLM_T, glm::u16vec4>) {
 			return vk::Format::eR16G16B16A16Uint;
 		}

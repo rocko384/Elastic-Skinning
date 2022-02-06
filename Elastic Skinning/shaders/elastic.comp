@@ -1,0 +1,42 @@
+#version 450
+
+struct SkeletalVertex {
+	uvec4 joints;
+	vec4 weights;
+	vec3 position;
+	vec3 normal;
+	vec3 color;
+	vec2 texcoords;
+};
+
+struct Vertex {
+	vec3 position;
+	vec3 normal;
+	vec3 color;
+	vec2 texcoords;
+};
+
+layout(local_size_x = 256) in;
+
+layout(std140, set = 0, binding = 0) readonly buffer SkeletalMeshBuffer {
+	SkeletalVertex vertices[];
+} SkeletalMesh;
+
+layout(std140, set = 0, binding = 1) buffer OutMeshBuffer {
+	Vertex vertices[];
+} OutMesh;
+
+layout(push_constant) uniform PushConstants {
+	uint vertex_count;
+} Context;
+
+void main() {
+	uint gID = gl_GlobalInvocationID.x;
+
+	if (gID < Context.vertex_count) {
+		OutMesh.vertices[gID].position = SkeletalMesh.vertices[gID].position;
+		OutMesh.vertices[gID].normal = SkeletalMesh.vertices[gID].normal;
+		OutMesh.vertices[gID].color = SkeletalMesh.vertices[gID].color;
+		OutMesh.vertices[gID].texcoords = SkeletalMesh.vertices[gID].texcoords;
+	}
+}

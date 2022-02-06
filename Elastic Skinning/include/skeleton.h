@@ -32,9 +32,18 @@ struct Skeleton {
 	Retval<Animation*, Error> get_animation(const std::string& name);
 	Retval<Animation*, Error> get_animation(StringHash name);
 
+	Error play_animation(const std::string& name);
+	Error play_animation(StringHash name);
+	void clear_animation();
+
+	std::vector<Bone> sample_animation_frame();
+
 	std::vector<Bone> bones;
 	std::vector<StringHash> bone_names;
 
 	std::vector<Animation> animations;
 	std::vector<StringHash> animation_names;
+
+	Animation* active_animation{ nullptr };
+	std::chrono::steady_clock::time_point animation_start_time;
 };

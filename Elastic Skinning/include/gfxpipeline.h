@@ -48,7 +48,7 @@ struct GfxPipelineImpl {
 	vk::PipelineLayout pipeline_layout;
 	vk::Pipeline pipeline;
 
-	vk::PushConstantRange mesh_id_push_constant{ vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32_t) };
+	const vk::PushConstantRange mesh_id_push_constant{ vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32_t) };
 
 	std::vector<StringHash> descriptor_type_names;
 	std::unordered_map<StringHash, bool> descriptor_is_buffer;

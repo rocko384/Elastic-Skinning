@@ -13,15 +13,21 @@ Keyframe Channel::sample(std::chrono::milliseconds time) {
 	Keyframe keyframeA;
 	Keyframe keyframeB;
 
-	for (size_t keyframe = 1; keyframe < time_points.size(); keyframe++) {
-		if (time > time_points[keyframe - 1] && time <= time_points[keyframe]) {
-			timepointA = time_points[keyframe - 1];
-			timepointB = time_points[keyframe];
-			
-			keyframeA = keyframes[keyframe - 1];
-			keyframeB = keyframes[keyframe];
+	if (time > std::chrono::milliseconds(0) && time <= time_points[0]) {
+		keyframeA = keyframes[0];
+		keyframeB = keyframes[0];
+	}
+	else {
+		for (size_t keyframe = 1; keyframe < time_points.size(); keyframe++) {
+			if (time > time_points[keyframe - 1] && time <= time_points[keyframe]) {
+				timepointA = time_points[keyframe - 1];
+				timepointB = time_points[keyframe];
 
-			break;
+				keyframeA = keyframes[keyframe - 1];
+				keyframeB = keyframes[keyframe];
+
+				break;
+			}
 		}
 	}
 

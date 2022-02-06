@@ -44,6 +44,7 @@ class GfxContext {
 	friend class RendererImpl;
 	friend class Swapchain;
 	friend class GfxPipelineImpl;
+	friend class ComputePipelineImpl;
 
 public:
 
@@ -60,6 +61,7 @@ public:
 	BufferAllocation create_transfer_buffer(vk::DeviceSize Size);
 	BufferAllocation create_uniform_buffer(vk::DeviceSize Size);
 	BufferAllocation create_storage_buffer(vk::DeviceSize Size);
+	BufferAllocation create_gpu_storage_buffer(vk::DeviceSize Size);
 	BufferAllocation create_buffer(vk::DeviceSize Size, vk::BufferUsageFlags Usage, vk::SharingMode SharingMode, VmaMemoryUsage Locality);
 	void destroy_buffer(BufferAllocation Buffer);
 

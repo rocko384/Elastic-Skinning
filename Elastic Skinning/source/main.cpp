@@ -21,14 +21,7 @@ int main(int argc, char** argv) {
 		.set_vertex_shader("shaders/base.vert.bin")
 		.set_fragment_shader("shaders/base.frag.bin");
 
-
-	GfxPipeline<SkeletalVertex, ModelBuffer, CameraBuffer, ColorSampler> base_skel_pipeline;
-	base_skel_pipeline
-		.set_vertex_shader("shaders/baseskel.vert.bin")
-		.set_fragment_shader("shaders/base.frag.bin");
-
 	renderer.register_pipeline("base", base_pipeline);
-	renderer.register_pipeline("baseskel", base_skel_pipeline);
 
 	Retval<Image, AssetError> defaulttex = load_image("textures/default.png");
 	Retval<Image, AssetError> colortest = load_image("textures/colortest.png");
