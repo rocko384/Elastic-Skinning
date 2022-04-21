@@ -1,0 +1,45 @@
+
+#version 450
+
+#include "common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+layout(std140, set = 0, binding = 0) readonly buffer BoneBuffer {
+	Bone bones[];
+} Skeleton;
+
+layout(set = 0, binding = 1) uniform sampler3D PartIsogradfield;
+
+layout(rgba32f, set = 0, binding = 3) uniform writeonly image3D OutIsogradfield;
+
+layout(push_constant) uniform PushConstants {
+	uint boneidx;
+	float scale;
+} Context;
+
+void main() {
+	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
+	ivec3 dims = ivec3(gl_WorkGroupSize * gl_NumWorkGroups);
+	
+	Bone bone = Skeleton.bones[Context.boneidx];
+
+	vec3 spacial = grid_to_coords(coords, dims, Context.scale);
+
+	vec3 point = transform_by_bone_inv(spacial, bone);
+
+	vec3 samplerCoords = coords_to_sampler(point, dims, Context.scale);
+
+	samplerCoords = clamp(samplerCoords, 0.0, 1.0);
+
+	vec4 isograd = texture(PartIsogradfield, samplerCoords);
+	
+	float val = isograd.x;
+	vec3 grad = isograd.yzw;
+
+	grad = rotate_by_bone(grad, bone);
+	
+	vec4 outVal = vec4(val, grad);
+
+	imageStore(OutIsogradfield, coords, outVal);
+}

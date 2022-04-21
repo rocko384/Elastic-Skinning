@@ -451,7 +451,7 @@ BufferAllocation GfxContext::create_index_buffer(vk::DeviceSize Size) {
 BufferAllocation GfxContext::create_transfer_buffer(vk::DeviceSize Size) {
 	return create_buffer(
 		Size,
-		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
 		vk::SharingMode::eExclusive,
 		VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY
 	);
@@ -515,6 +515,18 @@ TextureAllocation GfxContext::create_texture_2d(vk::Extent2D Dimensions, vk::For
 	);
 }
 
+TextureAllocation GfxContext::create_texture_3d(vk::Extent3D Dimensions, vk::Format Format) {
+	return create_texture(
+		vk::ImageType::e3D,
+		Format,
+		vk::ImageUsageFlagBits::eSampled
+		| vk::ImageUsageFlagBits::eStorage
+		| vk::ImageUsageFlagBits::eTransferDst
+		| vk::ImageUsageFlagBits::eTransferSrc,
+		Dimensions
+	);
+}
+
 TextureAllocation GfxContext::create_depth_buffer(vk::Extent2D Dimensions) {
 	return create_texture(
 		vk::ImageType::e2D,
@@ -561,6 +573,24 @@ void GfxContext::destroy_texture(TextureAllocation Texture) {
 	vmaDestroyImage(allocator, Texture.image, Texture.allocation);
 }
 
+vk::ImageView GfxContext::create_image_view(TextureAllocation Texture, vk::ImageViewType Type) {
+	vk::ImageViewCreateInfo viewInfo;
+	viewInfo.image = Texture.image;
+	viewInfo.viewType = Type;
+	viewInfo.format = Texture.format;
+	viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+
+	return primary_logical_device.createImageView(viewInfo);
+}
+
+void GfxContext::destroy_image_view(vk::ImageView View) {
+	primary_logical_device.destroy(View);
+}
+
 void GfxContext::transfer_buffer_memory(BufferAllocation Dest, BufferAllocation Source, vk::DeviceSize Size) {
 
 	vk::CommandBuffer transferCommandBuffer = one_time_command_begin();
@@ -597,6 +627,29 @@ void GfxContext::transfer_buffer_to_texture(TextureAllocation Dest, BufferAlloca
 	one_time_command_end(transferCommandBuffer);
 }
 
+
+void GfxContext::transfer_texture_to_buffer(BufferAllocation Dest, TextureAllocation Source) {
+	
+	vk::CommandBuffer transferCommandBuffer = one_time_command_begin();
+
+	vk::BufferImageCopy copyRegion;
+	copyRegion.bufferOffset = 0;
+	copyRegion.bufferRowLength = 0;
+	copyRegion.bufferImageHeight = 0;
+
+	copyRegion.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+	copyRegion.imageSubresource.mipLevel = 0;
+	copyRegion.imageSubresource.baseArrayLayer = 0;
+	copyRegion.imageSubresource.layerCount = 1;
+
+	copyRegion.imageOffset = vk::Offset3D{ 0, 0, 0 };
+	copyRegion.imageExtent = Source.dimensions;
+
+	transferCommandBuffer.copyImageToBuffer(Source.image, vk::ImageLayout::eTransferSrcOptimal, Dest.buffer, copyRegion);
+
+	one_time_command_end(transferCommandBuffer);
+}
+
 void GfxContext::upload_to_gpu_buffer(BufferAllocation Dest, const BinaryBlob& Source) {
 	upload_to_gpu_buffer(Dest, Source.data(), Source.size());
 }
@@ -617,22 +670,91 @@ void GfxContext::upload_to_gpu_buffer(BufferAllocation Dest, const void* Source,
 }
 
 void GfxContext::upload_texture(TextureAllocation Dest, const Image& Source) {
-	transition_image_layout(Dest, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-	
-	BufferAllocation transferBuffer = create_transfer_buffer(Source.data.size());
+	upload_texture(Dest, Source.data);
+}
 
+void GfxContext::upload_texture(TextureAllocation Dest, const BinaryBlob& Source) {
+	upload_texture(Dest, Source.data(), Source.size());
+}
+
+void GfxContext::upload_texture(TextureAllocation Dest, const void* Source, size_t Size) {
+	transition_image_layout(Dest, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+
+	BufferAllocation transferBuffer = create_transfer_buffer(Size);
+	
 	void* data;
 	vmaMapMemory(allocator, transferBuffer.allocation, &data);
-	std::memcpy(data, Source.data.data(), Source.data.size());
+	std::memcpy(data, Source, Size);
 	vmaUnmapMemory(allocator, transferBuffer.allocation);
 
-	vmaFlushAllocation(allocator, transferBuffer.allocation, 0, Source.data.size());
+	vmaFlushAllocation(allocator, transferBuffer.allocation, 0, Size);
 
 	transfer_buffer_to_texture(Dest, transferBuffer, transferBuffer.size);
 
 	destroy_buffer(transferBuffer);
-	
+
 	transition_image_layout(Dest, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+}
+
+BinaryBlob GfxContext::download_gpu_buffer(BufferAllocation Source) {
+	BufferAllocation transferBuffer = create_transfer_buffer(Source.size);
+
+	transfer_buffer_memory(transferBuffer, Source, Source.size);
+
+	BinaryBlob ret;
+	ret.resize(Source.size);
+
+	void* data;
+	vmaMapMemory(allocator, transferBuffer.allocation, &data);
+	std::memcpy(ret.data(), data, Source.size);
+	vmaUnmapMemory(allocator, transferBuffer.allocation);
+
+	vmaFlushAllocation(allocator, transferBuffer.allocation, 0, Source.size);
+
+	destroy_buffer(transferBuffer);
+
+	return ret;
+}
+
+BinaryBlob GfxContext::download_texture(TextureAllocation Source) {
+	transition_image_layout(Source, Source.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
+
+	size_t volume = Source.dimensions.width * Source.dimensions.height * Source.dimensions.depth;
+	size_t bytesize = 1;
+
+	switch (Source.format) {
+	case vk::Format::eR32G32B32A32Sfloat: 
+		bytesize = sizeof(glm::vec4);
+		break;
+	case vk::Format::eR32Sfloat:
+		bytesize = sizeof(float);
+		break;
+	default:
+		bytesize = 1;
+		break;
+	}
+
+	size_t size = volume * bytesize;
+
+	BufferAllocation transferBuffer = create_transfer_buffer(size);
+
+	transfer_texture_to_buffer(transferBuffer, Source);
+	
+	transition_image_layout(Source, Source.format, vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+	BinaryBlob ret;
+	ret.resize(size);
+
+	void* data;
+	vmaMapMemory(allocator, transferBuffer.allocation, &data);
+	std::memcpy(ret.data(), data, size);
+	vmaUnmapMemory(allocator, transferBuffer.allocation);
+
+	vmaFlushAllocation(allocator, transferBuffer.allocation, 0, size);
+
+	destroy_buffer(transferBuffer);
+
+	return ret;
 }
 
 void GfxContext::transition_image_layout(TextureAllocation Texture, vk::Format Format, vk::ImageLayout Old, vk::ImageLayout New) {
@@ -663,6 +785,13 @@ void GfxContext::transition_image_layout(TextureAllocation Texture, vk::Format F
 			sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
 			destStage = vk::PipelineStageFlagBits::eTransfer;
 		}
+		else if (New == vk::ImageLayout::eTransferSrcOptimal) {
+			barrier.srcAccessMask = vk::AccessFlagBits::eNoneKHR;
+			barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+
+			sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+			destStage = vk::PipelineStageFlagBits::eTransfer;
+		}
 		else if (New == vk::ImageLayout::eDepthAttachmentOptimal || New == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
 			barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
 
@@ -673,8 +802,16 @@ void GfxContext::transition_image_layout(TextureAllocation Texture, vk::Format F
 			sourceStage = vk::PipelineStageFlagBits::eVertexShader;
 			destStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
 		}
+		else if (New == vk::ImageLayout::eGeneral) {
+			barrier.srcAccessMask = vk::AccessFlagBits::eNoneKHR;
+			barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead
+				| vk::AccessFlagBits::eShaderWrite;
+
+			sourceStage = vk::PipelineStageFlagBits::eComputeShader;
+			destStage = vk::PipelineStageFlagBits::eComputeShader;
+		}
 	}
-	else if (Old == vk::ImageLayout::eTransferDstOptimal && New == vk::ImageLayout::eShaderReadOnlyOptimal) {
+	else if ((Old == vk::ImageLayout::eTransferDstOptimal || Old == vk::ImageLayout::eTransferSrcOptimal) && New == vk::ImageLayout::eShaderReadOnlyOptimal) {
 		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 

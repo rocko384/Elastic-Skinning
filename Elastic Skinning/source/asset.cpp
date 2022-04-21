@@ -2,6 +2,7 @@
 
 #include <stb_image.h>
 #include <tiny_gltf.h>
+#include <glm/glm.hpp>
 
 #include <fstream>
 #include <variant>
@@ -372,6 +373,7 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 					Bone outBone;
 
 					outBone.inverse_bind_matrix = matrix_accessor[i];
+					outBone.bind_matrix = glm::inverse(outBone.inverse_bind_matrix);
 
 					bool has_rotation = joint.rotation.size() != 0;
 					bool has_position = joint.translation.size() != 0;
@@ -379,10 +381,10 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 
 					outBone.rotation = has_rotation ?
 						glm::quat{
+							static_cast<float>(joint.rotation[3]),
 							static_cast<float>(joint.rotation[0]),
 							static_cast<float>(joint.rotation[1]),
-							static_cast<float>(joint.rotation[2]),
-							static_cast<float>(joint.rotation[3])
+							static_cast<float>(joint.rotation[2])
 						} : glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f };
 
 					outBone.position = has_position ?
@@ -400,6 +402,11 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 						} : glm::vec3{ 1.0f, 1.0f, 1.0f };
 
 					ret.skeleton.add_bone(outBone, joint.name);
+
+					for (size_t childidx = 0; childidx < joint.children.size(); childidx++) {
+						auto& child = model.nodes[joint.children[childidx]];
+						ret.skeleton.add_bone_relationship(joint.name, child.name);
+					}
 				}
 			}
 		}
@@ -457,7 +464,8 @@ Retval<Model, AssetError> load_model(std::filesystem::path path) {
 				}
 				else if (targetPath == "rotation") {
 					glm::quat outRot = rotationAccessor[keyframe];
-					outChannels[outChannel].keyframes[keyframe].rotation = outRot;
+
+					outChannels[outChannel].keyframes[keyframe].rotation = glm::quat{ outRot.z, outRot.w, outRot.x, outRot.y };
 				}
 				else if (targetPath == "scale") {
 					glm::vec3 outScale = scaleAccessor[keyframe];

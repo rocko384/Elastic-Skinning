@@ -104,16 +104,22 @@ void RendererImpl::constructor_impl(GfxContext* Context) {
 	texture_sampler = context->primary_logical_device.createSampler(samplerInfo);
 
 	/*
-	* Skinning compute kernel init
+	* Skinning compute kernels init
 	*/
 
-	skinning_pipeline.shader_path = "shaders/elastic.comp.bin";
+	skinning_pipeline.shader_path = "shaders/elasticmeshtx.comp.bin";
 	ComputePipelineImpl::Error skinningError = skinning_pipeline.init(context);
 
 	if (skinningError != ComputePipelineImpl::Error::OK) {
 		LOG_ERROR("Failed to initialize skinning kernel");
 		return;
 	}
+
+	/*
+	* Field blending context init
+	*/
+
+	field_composer = std::make_unique<ElasticFieldComposer>(context, &render_swapchain);
 
 	/*
 	* Finish initialization
@@ -131,7 +137,7 @@ RendererImpl::~RendererImpl() {
 		context->primary_logical_device.destroy(descriptor_pool);
 
 		for (auto& texture : textures) {
-			context->primary_logical_device.destroy(texture.second.view);
+			context->destroy_image_view(texture.second.view);
 			context->destroy_texture(texture.second.texture);
 		}
 
@@ -143,10 +149,29 @@ RendererImpl::~RendererImpl() {
 		for (auto& mesh : skeletal_meshes) {
 			context->destroy_buffer(mesh.vertex_source_buffer);
 
+			context->destroy_image_view(mesh.rest_isogradfield.view);
+			context->destroy_texture(mesh.rest_isogradfield.texture);
+
+			for (auto& f : mesh.part_isogradfields) {
+				context->destroy_image_view(f.view);
+				context->destroy_texture(f.texture);
+			}
+
 			for (auto& buf : mesh.vertex_out_buffers) {
 				context->destroy_buffer(buf);
 			}
+
+			for (auto& buf : mesh.sampled_bone_buffers) {
+				context->destroy_buffer(buf);
+			}
+
+			for (auto& f : mesh.transformed_isogradfields) {
+				context->destroy_image_view(f.view);
+				context->destroy_texture(f.texture);
+			}
 		}
+
+		field_composer.reset(nullptr);
 
 		context->primary_logical_device.destroy(command_pool);
 
@@ -311,7 +336,7 @@ RendererImpl::Error RendererImpl::register_texture(StringHash Name, const Image&
 	viewInfo.subresourceRange.baseArrayLayer = 0;
 	viewInfo.subresourceRange.layerCount = 1;
 
-	vk::ImageView imageView = context->primary_logical_device.createImageView(viewInfo);
+	vk::ImageView imageView = context->create_image_view(texture);
 
 	textures[Name] = { texture, imageView };
 
@@ -328,7 +353,7 @@ RendererImpl::Error RendererImpl::set_default_texture(const Image& Image) {
 	return register_texture(DEFAULT_TEXTURE_NAME, Image);
 }
 
-Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh Mesh, ModelTransform* Transform) {
+Retval<MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh& Mesh, ModelTransform* Transform) {
 	StringHash MaterialHash = Mesh.material_name.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(Mesh.material_name);
 
 	if (!materials.contains(MaterialHash)) {
@@ -371,7 +396,7 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Mesh
 	return { static_cast<MeshId>(meshes.size() - 1), Error::OK };
 }
 
-Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(SkeletalMesh Mesh, ModelTransform* Transform) {
+Retval<MeshId, RendererImpl::Error> RendererImpl::digest_mesh(SkeletalMesh& Mesh, Skeleton* Skeleton, ModelTransform* Transform) {
 	StringHash MaterialHash = Mesh.material_name.empty() ? DEFAULT_MATERIAL_NAME : CRC::crc64(Mesh.material_name);
 
 	if (!materials.contains(MaterialHash)) {
@@ -412,15 +437,15 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Skel
 	* Prepare source mesh to transform from
 	*/
 	InternalSkeletalMesh digestedSkeletalMesh;
-
-	digestedSkeletalMesh.out_mesh_id = staticMeshId;
-
+	
+	digestedSkeletalMesh.skeleton = Skeleton;
 	digestedSkeletalMesh.vertex_count = Mesh.vertices.size();
+	digestedSkeletalMesh.out_mesh_id = staticMeshId;
 
 	/*
 	* Create and allocate GPU buffer for skeletal vertices
 	*/
-	size_t skelVertexMemorySize = sizeof(SkeletalVertex) * Mesh.vertices.size();
+	size_t skelVertexMemorySize = sizeof(ElasticVertex) * Mesh.vertices.size();
 
 	digestedSkeletalMesh.vertex_source_buffer = context->create_gpu_storage_buffer(skelVertexMemorySize);
 	
@@ -434,17 +459,108 @@ Retval<RendererImpl::MeshId, RendererImpl::Error> RendererImpl::digest_mesh(Skel
 	}
 
 	/*
+	* Create per frame buffers for bone states
+	*/
+	size_t bonesMemorySize = Skeleton->bones.size() * sizeof(Bone);
+	digestedSkeletalMesh.sampled_bone_buffers.resize(render_swapchain.size());
+
+	for (auto& buf : digestedSkeletalMesh.sampled_bone_buffers) {
+		buf = context->create_storage_buffer(bonesMemorySize);
+	}
+
+	/*
+	* Convert geometric skeletal mesh to elastic skeletal mesh
+	*/
+	auto parts = ElasticSkinning::partition_skeletal_mesh(Mesh, *Skeleton);
+	auto hrbf_data = ElasticSkinning::create_hrbf_data(parts);
+	auto whole = ElasticSkinning::compose_hrbfs(hrbf_data, parts);
+
+	ElasticSkinning::create_debug_csv(hrbf_data, "debug/parts");
+	ElasticSkinning::create_debug_csv(whole, "debug/whole");
+
+	ElasticSkinning::MeshAndField elasticMesh = ElasticSkinning::convert_skeletal_mesh(Mesh, *Skeleton);
+
+	digestedSkeletalMesh.rest_isogradfield.texture = context->create_texture_3d(
+		{
+			elasticMesh.rest_field.Width,
+			elasticMesh.rest_field.Height,
+			elasticMesh.rest_field.Depth
+		},
+		vk::Format::eR32G32B32A32Sfloat
+	);
+
+	digestedSkeletalMesh.rest_isogradfield.view = context->create_image_view(digestedSkeletalMesh.rest_isogradfield.texture, vk::ImageViewType::e3D);
+
+
+	digestedSkeletalMesh.part_isogradfields.resize(Skeleton->bones.size());
+
+	for (size_t i = 0; i < Skeleton->bones.size(); i++) {
+		digestedSkeletalMesh.part_isogradfields[i].texture = context->create_texture_3d(
+			{
+				elasticMesh.rest_field.Width,
+				elasticMesh.rest_field.Height,
+				elasticMesh.rest_field.Depth
+			},
+			vk::Format::eR32G32B32A32Sfloat
+		);
+
+		digestedSkeletalMesh.part_isogradfields[i].view = context->create_image_view(digestedSkeletalMesh.part_isogradfields[i].texture, vk::ImageViewType::e3D);
+	}
+
+	digestedSkeletalMesh.transformed_isogradfields.resize(render_swapchain.size());
+
+	for (auto& f : digestedSkeletalMesh.transformed_isogradfields) {
+		f.texture = context->create_texture_3d(
+			{
+				elasticMesh.rest_field.Width,
+				elasticMesh.rest_field.Height,
+				elasticMesh.rest_field.Depth
+			},
+			vk::Format::eR32G32B32A32Sfloat
+		);
+
+		context->transition_image_layout(f.texture, f.texture.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
+
+		f.view = context->create_image_view(f.texture, vk::ImageViewType::e3D);
+	}
+
+	digestedSkeletalMesh.field_dims = glm::ivec3{ elasticMesh.rest_field.Width, elasticMesh.rest_field.Height, elasticMesh.rest_field.Depth };
+	digestedSkeletalMesh.isofield_scale = elasticMesh.rest_field.Scale;
+
+	/*
 	* Upload data to GPU
 	*/
-	context->upload_to_gpu_buffer(digestedSkeletalMesh.vertex_source_buffer, Mesh.vertices.data(), skelVertexMemorySize);
-	context->upload_to_gpu_buffer(digestedMesh.index_buffer, Mesh.indices.data(), indexMemorySize);
+	auto restSkeleton = Skeleton->sample_animation_frame();
+
+	for (auto& b : restSkeleton) {
+		b.position = -b.position;
+		b.rotation = glm::inverse(b.rotation);
+		b.scale = 1.0f / b.scale;
+	}
+
+	context->upload_to_gpu_buffer(digestedSkeletalMesh.vertex_source_buffer, elasticMesh.mesh.vertices.data(), skelVertexMemorySize);
+	context->upload_to_gpu_buffer(digestedMesh.index_buffer, elasticMesh.mesh.indices.data(), indexMemorySize);
+
+	ElasticSkinning::ScalarVectorField3D combinedRestField = ElasticSkinning::combine_fields(elasticMesh.rest_field.isofield, elasticMesh.rest_field.gradients);
+
+	context->upload_texture(digestedSkeletalMesh.rest_isogradfield.texture, combinedRestField.values.data(), combinedRestField.values.size() * sizeof(glm::vec4));
+	context->transition_image_layout(digestedSkeletalMesh.rest_isogradfield.texture, digestedSkeletalMesh.rest_isogradfield.texture.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
+
+	for (auto& [boneName, field] : elasticMesh.part_fields) {
+		auto [idx, e] = Skeleton->get_bone_index(boneName);
+
+		ElasticSkinning::ScalarVectorField3D combinedField = ElasticSkinning::combine_fields(field.isofield, field.gradients);
+
+		context->upload_texture(digestedSkeletalMesh.part_isogradfields[idx].texture, combinedField.values.data(), combinedField.values.size() * sizeof(glm::vec4));
+		context->transition_image_layout(digestedSkeletalMesh.part_isogradfields[idx].texture, digestedSkeletalMesh.part_isogradfields[idx].texture.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
+	}
 
 	skeletal_meshes.push_back(digestedSkeletalMesh);
 
 	return { staticMeshId, Error::OK };
 }
 
-Retval<RendererImpl::ModelId, RendererImpl::Error> RendererImpl::digest_model(Model Model, ModelTransform* Transform) {
+Retval<ModelId, RendererImpl::Error> RendererImpl::digest_model(Model& Model, ModelTransform* Transform) {
 	for (auto& material : Model.materials) {
 		register_material(material);
 	}
@@ -457,7 +573,7 @@ Retval<RendererImpl::ModelId, RendererImpl::Error> RendererImpl::digest_model(Mo
 			digest_mesh(*meshptr, Transform);
 		}
 		else if (skelmeshptr != nullptr) {
-			digest_mesh(*skelmeshptr, Transform);
+			digest_mesh(*skelmeshptr, &Model.skeleton, Transform);
 		}
 	}
 
@@ -509,6 +625,29 @@ void RendererImpl::draw_frame() {
 	if (render_swapchain.present_frame(frame.value) != Swapchain::Error::OK) {
 		LOG_ERROR("Swapchain presentation failure");
 	}
+
+	// GPU Elastic Skinning debug out
+#if 0 > 0
+	{
+		context->primary_logical_device.waitIdle();
+
+		auto isofielddata = context->download_texture(skeletal_meshes[0].transformed_isogradfields[render_swapchain.current_frame].texture);
+		//auto isofielddata = context->download_texture(skeletal_meshes[0].rest_isogradfield.texture);
+		glm::vec4* fieldvals = reinterpret_cast<glm::vec4*>(isofielddata.data());
+		size_t fieldvalsnum = isofielddata.size() / sizeof(glm::vec4);
+
+		ElasticSkinning::HRBFData debugfield;
+		
+		debugfield.Scale = skeletal_meshes[0].isofield_scale;
+
+		for (size_t i = 0; i < fieldvalsnum; i++) {
+			debugfield.isofield.values[i] = fieldvals[i].x;
+			debugfield.gradients.values[i] = glm::vec3(fieldvals[i].y, fieldvals[i].z, fieldvals[i].w);
+		}
+
+		ElasticSkinning::create_debug_csv(debugfield, "Frame #" + std::to_string(render_swapchain.current_frame));
+	}
+#endif
 }
 
 void RendererImpl::create_render_state() {
@@ -727,6 +866,25 @@ void RendererImpl::update_frame_data(Swapchain::FrameId ImageIdx) {
 	std::vector<VkDeviceSize> updated_allocation_offsets;
 	std::vector<VkDeviceSize> updated_allocation_sizes;
 
+	// Animation data
+	for (auto& skelMesh : skeletal_meshes) {
+		VmaAllocation activeAllocation = skelMesh.sampled_bone_buffers[ImageIdx].allocation;
+
+		std::vector<Bone> sampledBones = skelMesh.skeleton->sample_animation_frame();
+
+		size_t transferSize = sampledBones.size() * sizeof(Bone);
+
+		void* data;
+		vmaMapMemory(context->allocator, activeAllocation, &data);
+		std::memcpy(data, sampledBones.data(), transferSize);
+		vmaUnmapMemory(context->allocator, activeAllocation);
+
+		updated_allocations.push_back(activeAllocation);
+		updated_allocation_offsets.push_back(0);
+		updated_allocation_sizes.push_back(transferSize);
+	}
+
+	// Render data
 	for (auto& name : buffer_type_names) {
 		VmaAllocation activeAllocation = frames[ImageIdx].data_buffers[name].allocation;
 
@@ -822,10 +980,37 @@ void RendererImpl::finish_mesh_digestion() {
 	numPerMeshBuffers *= pipelines.size();
 	numGlobalBuffers *= pipelines.size();
 
+	uint32_t maxBones = 0;
+	uint32_t numBones = 0;
+	uint32_t maxJoints = 0;
+	uint32_t numJoints = 0;
+	
+	for (auto& m : skeletal_meshes) {
+		uint32_t bones = m.skeleton->bones.size();
+
+		if (bones > maxBones) {
+			maxBones = bones;
+		}
+
+		numBones += bones;
+
+		uint32_t joints = m.skeleton->bone_relationships.size();
+
+		if (joints > maxJoints) {
+			maxJoints = joints;
+		}
+
+		numJoints += joints;
+	}
+
 	uint32_t numSkinningBuffers = render_swapchain.size() * skeletal_meshes.size();
+	uint32_t numSkinningFields = skeletal_meshes.size() + (2 * numBones) + (skeletal_meshes.size() * render_swapchain.size());
+	uint32_t numIntermediateFields = 6 * numJoints * render_swapchain.size();
 
 	std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
 		{ vk::DescriptorType::eStorageBuffer, numSkinningBuffers },
+		{ vk::DescriptorType::eCombinedImageSampler, numSkinningFields },
+		{ vk::DescriptorType::eStorageImage, numIntermediateFields },
 		{ vk::DescriptorType::eStorageBuffer, numPerMeshBuffers },
 		{ vk::DescriptorType::eUniformBuffer, numGlobalBuffers },
 		{ vk::DescriptorType::eCombinedImageSampler, numSamplers }
@@ -860,7 +1045,21 @@ void RendererImpl::finish_mesh_digestion() {
 			frames[i].buffer_descriptor_sets[pipeline.first] = descriptorSets[i];
 		}
 	}
-	
+
+	vk::Extent3D maxFieldDims{ 0, 0, 0 };
+
+	for (auto& m : skeletal_meshes) {
+		if (m.rest_isogradfield.texture.dimensions > maxFieldDims) {
+			maxFieldDims = m.rest_isogradfield.texture.dimensions;
+		}
+	}
+
+	field_composer->init_render_data(maxBones, numBones, maxJoints, numJoints, maxFieldDims);
+
+	for (auto& skelMesh : skeletal_meshes) {
+		field_composer->record_descriptor_sets(skelMesh.out_mesh_id, skelMesh.isofield_scale, skelMesh.part_isogradfields, skelMesh.transformed_isogradfields, skelMesh.sampled_bone_buffers, skelMesh.skeleton);
+	}
+
 	// Allocate skinning descriptor sets
 	for (auto& skelMesh : skeletal_meshes) {
 		std::vector<vk::DescriptorSetLayout> descriptorLayouts(render_swapchain.size(), skinning_pipeline.descriptor_set_layout);
@@ -896,53 +1095,107 @@ void RendererImpl::finish_mesh_digestion() {
 	for (auto& skelMesh : skeletal_meshes) {
 		std::vector<vk::WriteDescriptorSet> descriptorWrites;
 		std::list<vk::DescriptorBufferInfo> bufferInfos;
+		std::list<vk::DescriptorImageInfo> imageInfos;
 
 		for (size_t i = 0; i < render_swapchain.size(); i++) {
 			// In vertices
-			vk::WriteDescriptorSet sourceBufWrite;
+			{
+				vk::WriteDescriptorSet sourceBufWrite;
 
-			sourceBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
-			sourceBufWrite.dstBinding = SkeletalVertexBuffer::layout_binding().binding;
-			sourceBufWrite.dstArrayElement = 0;
-			sourceBufWrite.descriptorType = SkeletalVertexBuffer::layout_binding().descriptorType;
-			sourceBufWrite.descriptorCount = SkeletalVertexBuffer::layout_binding().descriptorCount;
+				sourceBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
+				sourceBufWrite.dstBinding = SkeletalVertexBuffer::layout_binding().binding;
+				sourceBufWrite.dstArrayElement = 0;
+				sourceBufWrite.descriptorType = SkeletalVertexBuffer::layout_binding().descriptorType;
+				sourceBufWrite.descriptorCount = SkeletalVertexBuffer::layout_binding().descriptorCount;
 
-			vk::DescriptorBufferInfo sourceBufferInfo;
+				vk::DescriptorBufferInfo sourceBufferInfo;
 
-			sourceBufferInfo.buffer = skelMesh.vertex_source_buffer.buffer;
-			sourceBufferInfo.offset = 0;
-			sourceBufferInfo.range = VK_WHOLE_SIZE;
+				sourceBufferInfo.buffer = skelMesh.vertex_source_buffer.buffer;
+				sourceBufferInfo.offset = 0;
+				sourceBufferInfo.range = VK_WHOLE_SIZE;
 
-			bufferInfos.push_back(sourceBufferInfo);
+				bufferInfos.push_back(sourceBufferInfo);
 
-			sourceBufWrite.pBufferInfo = &bufferInfos.back();
-			sourceBufWrite.pImageInfo = nullptr;
-			sourceBufWrite.pTexelBufferView = nullptr;
+				sourceBufWrite.pBufferInfo = &bufferInfos.back();
+				sourceBufWrite.pImageInfo = nullptr;
+				sourceBufWrite.pTexelBufferView = nullptr;
 
-			descriptorWrites.push_back(sourceBufWrite);
+				descriptorWrites.push_back(sourceBufWrite);
+			}
+
+			// In bones
+			{
+				vk::WriteDescriptorSet boneBufWrite;
+
+				boneBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
+				boneBufWrite.dstBinding = BoneBuffer::layout_binding().binding;
+				boneBufWrite.dstArrayElement = 0;
+				boneBufWrite.descriptorType = BoneBuffer::layout_binding().descriptorType;
+				boneBufWrite.descriptorCount = BoneBuffer::layout_binding().descriptorCount;
+
+				vk::DescriptorBufferInfo boneBufferInfo;
+
+				boneBufferInfo.buffer = skelMesh.sampled_bone_buffers[i].buffer;
+				boneBufferInfo.offset = 0;
+				boneBufferInfo.range = VK_WHOLE_SIZE;
+
+				bufferInfos.push_back(boneBufferInfo);
+
+				boneBufWrite.pBufferInfo = &bufferInfos.back();
+				boneBufWrite.pImageInfo = nullptr;
+				boneBufWrite.pTexelBufferView = nullptr;
+
+				descriptorWrites.push_back(boneBufWrite);
+			}
 
 			// Out vertices
-			vk::WriteDescriptorSet outBufWrite;
+			{
+				vk::WriteDescriptorSet outBufWrite;
 
-			outBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
-			outBufWrite.dstBinding = VertexBuffer::layout_binding().binding;
-			outBufWrite.dstArrayElement = 0;
-			outBufWrite.descriptorType = VertexBuffer::layout_binding().descriptorType;
-			outBufWrite.descriptorCount = VertexBuffer::layout_binding().descriptorCount;
+				outBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
+				outBufWrite.dstBinding = VertexBuffer::layout_binding().binding;
+				outBufWrite.dstArrayElement = 0;
+				outBufWrite.descriptorType = VertexBuffer::layout_binding().descriptorType;
+				outBufWrite.descriptorCount = VertexBuffer::layout_binding().descriptorCount;
 
-			vk::DescriptorBufferInfo outBufferInfo;
+				vk::DescriptorBufferInfo outBufferInfo;
 
-			outBufferInfo.buffer = skelMesh.vertex_out_buffers[i].buffer;
-			outBufferInfo.offset = 0;
-			outBufferInfo.range = VK_WHOLE_SIZE;
+				outBufferInfo.buffer = skelMesh.vertex_out_buffers[i].buffer;
+				outBufferInfo.offset = 0;
+				outBufferInfo.range = VK_WHOLE_SIZE;
 
-			bufferInfos.push_back(outBufferInfo);
+				bufferInfos.push_back(outBufferInfo);
 
-			outBufWrite.pBufferInfo = &bufferInfos.back();
-			outBufWrite.pImageInfo = nullptr;
-			outBufWrite.pTexelBufferView = nullptr;
+				outBufWrite.pBufferInfo = &bufferInfos.back();
+				outBufWrite.pImageInfo = nullptr;
+				outBufWrite.pTexelBufferView = nullptr;
 
-			descriptorWrites.push_back(outBufWrite);
+				descriptorWrites.push_back(outBufWrite);
+			}
+
+			// Current isograd field
+			{
+				vk::WriteDescriptorSet outBufWrite;
+
+				outBufWrite.dstSet = skelMesh.skinning_descriptor_sets[i];
+				outBufWrite.dstBinding = ElasticSkinning::CurrentIsogradfieldSampler::layout_binding().binding;
+				outBufWrite.dstArrayElement = 0;
+				outBufWrite.descriptorType = ElasticSkinning::CurrentIsogradfieldSampler::layout_binding().descriptorType;
+				outBufWrite.descriptorCount = ElasticSkinning::CurrentIsogradfieldSampler::layout_binding().descriptorCount;
+
+				vk::DescriptorImageInfo imageInfo;
+				imageInfo.imageLayout = vk::ImageLayout::eGeneral;
+				imageInfo.imageView = skelMesh.transformed_isogradfields[i].view;
+				imageInfo.sampler = texture_sampler;
+
+				imageInfos.push_back(imageInfo);
+
+				outBufWrite.pBufferInfo = nullptr;
+				outBufWrite.pImageInfo = &imageInfos.back();
+				outBufWrite.pTexelBufferView = nullptr;
+
+				descriptorWrites.push_back(outBufWrite);
+			}
 		}
 
 		context->primary_logical_device.updateDescriptorSets(descriptorWrites, nullptr);
@@ -1020,10 +1273,177 @@ void RendererImpl::finish_mesh_digestion() {
 	}
 }
 
+void RendererImpl::record_elastic_skinning_composition_command_buffer(Swapchain::FrameId ImageIdx) {
+	if (elastic_skinning_composition_command_buffers.empty()) {
+		vk::CommandBufferAllocateInfo commandBufferInfo;
+		commandBufferInfo.commandPool = command_pool;
+		commandBufferInfo.level = vk::CommandBufferLevel::eSecondary;
+		commandBufferInfo.commandBufferCount = 3;
+
+		elastic_skinning_composition_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
+	}
+
+	vk::CommandBuffer currentCommandBuffer = elastic_skinning_composition_command_buffers[ImageIdx];
+
+	currentCommandBuffer.reset();
+
+	vk::CommandBufferInheritanceInfo inheritanceInfo;
+	inheritanceInfo.renderPass = geometry_render_pass;
+	inheritanceInfo.subpass = 0;
+	inheritanceInfo.framebuffer = nullptr;
+	inheritanceInfo.occlusionQueryEnable = VK_FALSE;
+	inheritanceInfo.queryFlags = vk::QueryControlFlagBits(0);
+	inheritanceInfo.pipelineStatistics = vk::QueryPipelineStatisticFlagBits(0);
+
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
+	beginInfo.pInheritanceInfo = &inheritanceInfo;
+
+	currentCommandBuffer.begin(beginInfo);
+
+	for (auto& skelMesh : skeletal_meshes) {
+		field_composer->record_command_buffer(
+			ImageIdx,
+			currentCommandBuffer,
+			skelMesh.out_mesh_id
+		);
+	}
+
+	currentCommandBuffer.end();
+}
+
+void RendererImpl::record_elastic_skinning_animate_command_buffer(Swapchain::FrameId ImageIdx) {
+	if (elastic_skinning_animate_command_buffers.empty()) {
+		vk::CommandBufferAllocateInfo commandBufferInfo;
+		commandBufferInfo.commandPool = command_pool;
+		commandBufferInfo.level = vk::CommandBufferLevel::eSecondary;
+		commandBufferInfo.commandBufferCount = 3;
+
+		elastic_skinning_animate_command_buffers = context->primary_logical_device.allocateCommandBuffers(commandBufferInfo);
+	}
+
+	vk::CommandBuffer currentCommandBuffer = elastic_skinning_animate_command_buffers[ImageIdx];
+
+	currentCommandBuffer.reset();
+
+	vk::CommandBufferInheritanceInfo inheritanceInfo;
+	inheritanceInfo.renderPass = geometry_render_pass;
+	inheritanceInfo.subpass = 0;
+	inheritanceInfo.framebuffer = nullptr;
+	inheritanceInfo.occlusionQueryEnable = VK_FALSE;
+	inheritanceInfo.queryFlags = vk::QueryControlFlagBits(0);
+	inheritanceInfo.pipelineStatistics = vk::QueryPipelineStatisticFlagBits(0);
+
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.flags = (vk::CommandBufferUsageFlagBits)(0);
+	beginInfo.pInheritanceInfo = &inheritanceInfo;
+
+	currentCommandBuffer.begin(beginInfo);
+
+	// Skinning for skeletal meshes
+	currentCommandBuffer.bindPipeline(
+		vk::PipelineBindPoint::eCompute,
+		skinning_pipeline.pipeline
+	);
+
+	for (auto& skelMesh : skeletal_meshes) {
+		InternalMesh& targetMesh = meshes[skelMesh.out_mesh_id];
+
+		// Execute skinning kernel
+		{
+			ElasticSkinning::SkinningContext skinContext{
+				static_cast<uint32_t>(skelMesh.vertex_count),
+				static_cast<uint32_t>(skelMesh.skeleton->bones.size()),
+				skelMesh.isofield_scale,
+				skelMesh.field_dims
+			};
+
+			currentCommandBuffer.pushConstants<ElasticSkinning::SkinningContext>(
+				skinning_pipeline.pipeline_layout,
+				skinning_pipeline.context_push_constant.stageFlags,
+				skinning_pipeline.context_push_constant.offset,
+				skinContext
+			);
+
+			std::vector<vk::DescriptorSet> descriptorSets = { skelMesh.skinning_descriptor_sets[ImageIdx] };
+
+			currentCommandBuffer.bindDescriptorSets(
+				vk::PipelineBindPoint::eCompute,
+				skinning_pipeline.pipeline_layout,
+				0,
+				descriptorSets,
+				nullptr
+			);
+
+			uint32_t groupCount = (skelMesh.vertex_count / 256) + 1;
+
+			currentCommandBuffer.dispatch(groupCount, 1, 1);
+		}
+
+		// Barrier the output buffer
+		{
+			vk::BufferMemoryBarrier barrier;
+			barrier.buffer = skelMesh.vertex_out_buffers[ImageIdx].buffer;
+			barrier.offset = 0;
+			barrier.size = VK_WHOLE_SIZE;
+			barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+			barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+			barrier.srcQueueFamilyIndex = context->primary_queue_family_index;
+			barrier.dstQueueFamilyIndex = context->primary_queue_family_index;
+
+			currentCommandBuffer.pipelineBarrier(
+				vk::PipelineStageFlagBits::eComputeShader,
+				vk::PipelineStageFlagBits::eTransfer,
+				(vk::DependencyFlagBits)0,
+				nullptr,
+				barrier,
+				nullptr
+			);
+		}
+
+		// Transfer skinned output vertices to the vertex buffers to be rendered
+		{
+			vk::BufferCopy copyRegion;
+			copyRegion.srcOffset = 0;
+			copyRegion.dstOffset = 0;
+			copyRegion.size = skelMesh.vertex_count * sizeof(Vertex);
+
+			currentCommandBuffer.copyBuffer(skelMesh.vertex_out_buffers[ImageIdx].buffer, targetMesh.vertex_buffer.buffer, copyRegion);
+		}
+
+		// Barrier the rendered buffer
+		{
+			vk::BufferMemoryBarrier barrier;
+			barrier.buffer = targetMesh.vertex_buffer.buffer;
+			barrier.offset = 0;
+			barrier.size = VK_WHOLE_SIZE;
+			barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+			barrier.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead;
+			barrier.srcQueueFamilyIndex = context->primary_queue_family_index;
+			barrier.dstQueueFamilyIndex = context->primary_queue_family_index;
+
+			currentCommandBuffer.pipelineBarrier(
+				vk::PipelineStageFlagBits::eTransfer,
+				vk::PipelineStageFlagBits::eVertexInput,
+				(vk::DependencyFlagBits)0,
+				nullptr,
+				barrier,
+				nullptr
+			);
+		}
+	}
+
+	currentCommandBuffer.end();
+}
+
 void RendererImpl::record_command_buffers() {
 	context->primary_logical_device.waitIdle();
 
 	for (size_t i = 0; i < primary_render_command_buffers.size(); i++) {
+
+		record_elastic_skinning_composition_command_buffer(i);
+		record_elastic_skinning_animate_command_buffer(i);
+
 		vk::CommandBuffer currentCommandBuffer = primary_render_command_buffers[i];
 
 		vk::CommandBufferBeginInfo beginInfo;
@@ -1032,91 +1452,8 @@ void RendererImpl::record_command_buffers() {
 
 		currentCommandBuffer.begin(beginInfo);
 
-		// Skinning for skeletal meshes
-		currentCommandBuffer.bindPipeline(
-			vk::PipelineBindPoint::eCompute,
-			skinning_pipeline.pipeline
-		);
-
-		for (auto& skelMesh : skeletal_meshes) {
-			InternalMesh& targetMesh = meshes[skelMesh.out_mesh_id];
-
-			// Execute skinning kernel
-			{
-				currentCommandBuffer.pushConstants<MeshId>(
-					skinning_pipeline.pipeline_layout,
-					skinning_pipeline.context_push_constant.stageFlags,
-					skinning_pipeline.context_push_constant.offset,
-					static_cast<uint32_t>(skelMesh.vertex_count)
-					);
-
-				std::vector<vk::DescriptorSet> descriptorSets = { skelMesh.skinning_descriptor_sets[i] };
-
-				currentCommandBuffer.bindDescriptorSets(
-					vk::PipelineBindPoint::eCompute,
-					skinning_pipeline.pipeline_layout,
-					0,
-					descriptorSets,
-					nullptr
-				);
-
-				uint32_t groupCount = (skelMesh.vertex_count / 256) + 1;
-
-				currentCommandBuffer.dispatch(groupCount, 1, 1);
-			}
-
-			// Barrier the output buffer
-			{
-				vk::BufferMemoryBarrier barrier;
-				barrier.buffer = skelMesh.vertex_out_buffers[i].buffer;
-				barrier.offset = 0;
-				barrier.size = VK_WHOLE_SIZE;
-				barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-				barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-				barrier.srcQueueFamilyIndex = context->primary_queue_family_index;
-				barrier.dstQueueFamilyIndex = context->primary_queue_family_index;
-
-				currentCommandBuffer.pipelineBarrier(
-					vk::PipelineStageFlagBits::eComputeShader,
-					vk::PipelineStageFlagBits::eTransfer,
-					(vk::DependencyFlagBits)0,
-					nullptr,
-					barrier,
-					nullptr
-				);
-			}
-
-			// Transfer skinned output vertices to the vertex buffers to be rendered
-			{
-				vk::BufferCopy copyRegion;
-				copyRegion.srcOffset = 0;
-				copyRegion.dstOffset = 0;
-				copyRegion.size = skelMesh.vertex_count * sizeof(Vertex);
-
-				currentCommandBuffer.copyBuffer(skelMesh.vertex_out_buffers[i].buffer, targetMesh.vertex_buffer.buffer, copyRegion);
-			}
-
-			// Barrier the rendered buffer
-			{
-				vk::BufferMemoryBarrier barrier;
-				barrier.buffer = targetMesh.vertex_buffer.buffer;
-				barrier.offset = 0;
-				barrier.size = VK_WHOLE_SIZE;
-				barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-				barrier.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead;
-				barrier.srcQueueFamilyIndex = context->primary_queue_family_index;
-				barrier.dstQueueFamilyIndex = context->primary_queue_family_index;
-
-				currentCommandBuffer.pipelineBarrier(
-					vk::PipelineStageFlagBits::eTransfer,
-					vk::PipelineStageFlagBits::eVertexInput,
-					(vk::DependencyFlagBits)0,
-					nullptr,
-					barrier,
-					nullptr
-				);
-			}
-		}
+		currentCommandBuffer.executeCommands(elastic_skinning_composition_command_buffers[i]);
+		currentCommandBuffer.executeCommands(elastic_skinning_animate_command_buffers[i]);
 
 		vk::RenderPassBeginInfo renderPassInfo;
 		renderPassInfo.renderPass = geometry_render_pass;

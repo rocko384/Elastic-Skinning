@@ -39,12 +39,21 @@ struct TextureAllocation {
 	vk::Format format;
 };
 
+struct GPUTexture {
+	TextureAllocation texture;
+	vk::ImageView view;
+};
+
+using MeshId = uint32_t;
+using ModelId = uint32_t;
+
 class GfxContext {
 
 	friend class RendererImpl;
 	friend class Swapchain;
 	friend class GfxPipelineImpl;
 	friend class ComputePipelineImpl;
+	friend class ElasticFieldComposer;
 
 public:
 
@@ -66,6 +75,7 @@ public:
 	void destroy_buffer(BufferAllocation Buffer);
 
 	TextureAllocation create_texture_2d(vk::Extent2D Dimensions, vk::Format Format = vk::Format::eR8G8B8A8Srgb);
+	TextureAllocation create_texture_3d(vk::Extent3D Dimensions, vk::Format Format = vk::Format::eR8G8B8A8Srgb);
 	TextureAllocation create_depth_buffer(vk::Extent2D Dimensions);
 	TextureAllocation create_texture(
 		vk::ImageType Type,
@@ -79,12 +89,21 @@ public:
 	);
 	void destroy_texture(TextureAllocation Texture);
 
+	vk::ImageView create_image_view(TextureAllocation Texture, vk::ImageViewType Type = vk::ImageViewType::e2D);
+	void destroy_image_view(vk::ImageView View);
+
 	void transfer_buffer_memory(BufferAllocation Dest, BufferAllocation Source, vk::DeviceSize Size);
 	void transfer_buffer_to_texture(TextureAllocation Dest, BufferAllocation Source, vk::DeviceSize Size);
-	
+	void transfer_texture_to_buffer(BufferAllocation Dest, TextureAllocation Source);
+
 	void upload_to_gpu_buffer(BufferAllocation Dest, const BinaryBlob& Source);
 	void upload_to_gpu_buffer(BufferAllocation Dest, const void* Source, size_t Size);
 	void upload_texture(TextureAllocation Dest, const Image& Source);
+	void upload_texture(TextureAllocation Dest, const BinaryBlob& Source);
+	void upload_texture(TextureAllocation Dest, const void* Source, size_t Size);
+
+	BinaryBlob download_gpu_buffer(BufferAllocation Source);
+	BinaryBlob download_texture(TextureAllocation Source);
 
 	void transition_image_layout(TextureAllocation Texture, vk::Format Format, vk::ImageLayout Old, vk::ImageLayout New);
 

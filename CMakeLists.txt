@@ -24,6 +24,7 @@ add_subdirectory("Dependencies/tinygltf")
 
 set (VMA_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/Dependencies/VulkanMemoryAllocator/include")
 set (STB_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/Dependencies/stb")
+set (EIGEN_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/Dependencies/eigen")
 
 # Include sub-projects.
 add_subdirectory ("Elastic Skinning")

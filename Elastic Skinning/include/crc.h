@@ -43,7 +43,7 @@ namespace CRC {
 
 			for (std::size_t b = 0; b < 8; b++) {
 				if (table[i] & high_bit<T>) {
-					table[i] = ((table[i] << 1) ^ crc_polynomial<uint32_t>);
+					table[i] = ((table[i] << 1) ^ crc_polynomial<T>);
 				}
 				else {
 					table[i] = table[i] << 1;

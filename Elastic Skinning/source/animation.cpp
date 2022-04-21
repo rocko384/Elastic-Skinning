@@ -2,9 +2,9 @@
 
 #include <glm/gtx/compatibility.hpp>
 
-Keyframe Channel::sample(std::chrono::milliseconds time) {
+Retval<Keyframe, Channel::Status> Channel::sample(std::chrono::milliseconds time) {
 	if (time > time_points.back()) {
-		return keyframes.back();
+		return { keyframes.back(), Status::PAST_END };
 	}
 
 	std::chrono::milliseconds timepointA;
@@ -13,9 +13,12 @@ Keyframe Channel::sample(std::chrono::milliseconds time) {
 	Keyframe keyframeA;
 	Keyframe keyframeB;
 
-	if (time > std::chrono::milliseconds(0) && time <= time_points[0]) {
+	if (time >= std::chrono::milliseconds(0) && time <= time_points[0]) {
 		keyframeA = keyframes[0];
 		keyframeB = keyframes[0];
+
+		timepointA = time + std::chrono::milliseconds(0);
+		timepointB = time + std::chrono::milliseconds(1);
 	}
 	else {
 		for (size_t keyframe = 1; keyframe < time_points.size(); keyframe++) {
@@ -36,10 +39,13 @@ Keyframe Channel::sample(std::chrono::milliseconds time) {
 	float interp = numerator / denominator;
 
 	return {
-		glm::lerp(keyframeA.rotation, keyframeB.rotation, interp),
-		glm::lerp(keyframeA.position, keyframeB.position, interp),
-		glm::lerp(keyframeA.scale, keyframeB.scale, interp),
-		glm::lerp(keyframeA.weight, keyframeB.weight, interp)
+		{
+			glm::lerp(keyframeA.rotation, keyframeB.rotation, interp),
+			glm::lerp(keyframeA.position, keyframeB.position, interp),
+			glm::lerp(keyframeA.scale, keyframeB.scale, interp),
+			glm::lerp(keyframeA.weight, keyframeB.weight, interp)
+		},
+		Status::OK
 	};
 }
 

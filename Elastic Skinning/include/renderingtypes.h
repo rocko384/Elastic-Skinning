@@ -34,6 +34,14 @@ struct VkFormatType {
 		if constexpr (std::is_same_v<GLM_T, glm::u16vec4>) {
 			return vk::Format::eR16G16B16A16Uint;
 		}
+
+		if constexpr (std::is_same_v<GLM_T, uint32_t>) {
+			return vk::Format::eR32Uint;
+		}
+
+		if constexpr (std::is_same_v<GLM_T, float>) {
+			return vk::Format::eR32Sfloat;
+		}
 		
 		return vk::Format::eUndefined;
 	};
@@ -110,6 +118,14 @@ concept DescriptorType =
 		{T::name()} -> std::same_as<StringHash>;
 		{T::layout_binding()} -> std::same_as<vk::DescriptorSetLayoutBinding>;
 	};
+
+/// TODO: Reconsider the descriptor defintion pattern
+/// Maybe something like 'struct DescriptorDef<size_t Binding, size_t Count, enum Type, flags Stages>'
+/// Specialized to, t.d.: 'struct ComputeBuffer<size_t Binding> = DescriptorDef<size_t Binding, size_t 1, enum Storage, flags Compute>'
+/// t.d.: 'struct VertexUniform<size_t Binding>', or just 'struct Uniform<size_t Binding, flags Stages>'
+/// REMINDER: The names are there to allow for compatibility comparison between a renderer and pipeline,
+/// even though this isn't being done yet. Would have to reconsider how to do this (compatibility comparison)
+/// if this change is made.
 
 struct ModelBuffer {
 	glm::mat4 model;

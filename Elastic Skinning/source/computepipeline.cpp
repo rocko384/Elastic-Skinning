@@ -49,8 +49,15 @@ ComputePipelineImpl::Error ComputePipelineImpl::init(GfxContext* Context) {
 	vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
 	pipelineLayoutInfo.setLayoutCount = descriptorSetLayouts.size();
 	pipelineLayoutInfo.pSetLayouts = descriptorSetLayouts.data();
-	pipelineLayoutInfo.pushConstantRangeCount = 1;
-	pipelineLayoutInfo.pPushConstantRanges = &context_push_constant;
+
+	if (context_push_constant.size >= 4) {
+		pipelineLayoutInfo.pushConstantRangeCount = 1;
+		pipelineLayoutInfo.pPushConstantRanges = &context_push_constant;
+	}
+	else {
+		pipelineLayoutInfo.pushConstantRangeCount = 0;
+		pipelineLayoutInfo.pPushConstantRanges = nullptr;
+	}
 
 	pipeline_layout = context->primary_logical_device.createPipelineLayout(pipelineLayoutInfo);
 

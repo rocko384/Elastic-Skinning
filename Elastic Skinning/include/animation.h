@@ -22,7 +22,12 @@ struct Channel {
 		CubicSpline
 	};
 
-	Keyframe sample(std::chrono::milliseconds time);
+	enum class Status {
+		OK,
+		PAST_END
+	};
+
+	Retval<Keyframe, Status> sample(std::chrono::milliseconds time);
 
 	std::vector<std::chrono::milliseconds> time_points;
 	std::vector<Keyframe> keyframes;

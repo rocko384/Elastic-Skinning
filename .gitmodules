@@ -13,3 +13,6 @@
 [submodule "Dependencies/tinygltf"]
 	path = Dependencies/tinygltf
 	url = https://github.com/syoyo/tinygltf.git
+[submodule "Dependencies/eigen"]
+	path = Dependencies/eigen
+	url = https://gitlab.com/libeigen/eigen.git

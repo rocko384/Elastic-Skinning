@@ -30,12 +30,19 @@ set(SOURCE
 	"include/animation.h"
 	"source/animation.cpp"
 	"source/skeleton.cpp"
- "include/computepipeline.h" "source/computepipeline.cpp")
+	"include/computepipeline.h"
+	"source/computepipeline.cpp"
+	"include/elasticskinning.h"
+	"source/elasticskinning.cpp"
+ "include/elasticfieldcomposer.h" "source/elasticfieldcomposer.cpp")
 
-file(GLOB
-	SHADERS
-	RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-	shaders/*
+set(SHADERS
+	"shaders/base.frag"
+	"shaders/base.vert"
+	"shaders/baseskel.vert"
+	"shaders/elasticmeshtx.comp"
+	"shaders/elasticfieldtx.comp"
+	"shaders/elasticfieldblend.comp"
 )
 
 message(STATUS "Shaders ${SHADERS}")
@@ -54,6 +61,7 @@ target_include_directories(
 	"include"
 	${VMA_INCLUDE_DIR}
 	${STB_INCLUDE_DIR}
+	${EIGEN_INCLUDE_DIR}
 )
 
 target_link_libraries(

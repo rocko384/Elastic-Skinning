@@ -7,6 +7,8 @@
 #include "gfxpipeline.h"
 #include "computepipeline.h"
 #include "mesh.h"
+#include "elasticskinning.h"
+#include "elasticfieldcomposer.h"
 
 #include <vulkan/vulkan.hpp>
 
@@ -14,6 +16,7 @@
 #include <string>
 #include <unordered_map>
 #include <functional>
+#include <memory>
 #include <cstdint>
 
 class RendererImpl {
@@ -41,9 +44,6 @@ public:
 		MATERIAL_NOT_FOUND
 	};
 
-	using MeshId = uint32_t;
-	using ModelId = uint32_t;
-
 	RendererImpl(GfxContext* Context);
 	~RendererImpl();
 
@@ -60,9 +60,9 @@ public:
 	Error register_texture(StringHash Name, const Image& Image);
 	Error set_default_texture(const Image& Image);
 
-	Retval<MeshId, Error> digest_mesh(Mesh Mesh, ModelTransform* Transform);
-	Retval<MeshId, Error> digest_mesh(SkeletalMesh Mesh, ModelTransform* Transform);
-	Retval<ModelId, Error> digest_model(Model Model, ModelTransform* Transform);
+	Retval<MeshId, Error> digest_mesh(Mesh& Mesh, ModelTransform* Transform);
+	Retval<MeshId, Error> digest_mesh(SkeletalMesh& Mesh, Skeleton* Skeleton, ModelTransform* Transform);
+	Retval<ModelId, Error> digest_model(Model& Model, ModelTransform* Transform);
 
 	void set_camera(Camera* Camera);
 
@@ -83,6 +83,8 @@ protected:
 
 	void finish_mesh_digestion();
 
+	void record_elastic_skinning_composition_command_buffer(Swapchain::FrameId ImageIdx);
+	void record_elastic_skinning_animate_command_buffer(Swapchain::FrameId ImageIdx);
 	void record_command_buffers();
 	void reset_command_buffers();
 
@@ -94,11 +96,6 @@ protected:
 
 	bool is_init{ false };
 	bool is_first_render{ true };
-
-	struct InternalTexture {
-		TextureAllocation texture;
-		vk::ImageView view;
-	};
 
 	struct InternalMaterial {
 		StringHash albedo_texture_name{ DEFAULT_TEXTURE_NAME };
@@ -123,7 +120,7 @@ protected:
 
 	std::unordered_map<StringHash, InternalMaterial> materials;
 
-	std::unordered_map<StringHash, InternalTexture> textures;
+	std::unordered_map<StringHash, GPUTexture> textures;
 
 	vk::DescriptorPool descriptor_pool;
 
@@ -143,7 +140,7 @@ protected:
 		// frame_data_buffers[Buffer Type]
 		std::unordered_map<StringHash, BufferAllocation> data_buffers;
 
-		InternalTexture depthbuffer;
+		GPUTexture depthbuffer;
 
 		vk::Framebuffer framebuffer;
 	};
@@ -169,24 +166,36 @@ protected:
 
 	struct InternalSkeletalMesh {
 		BufferAllocation vertex_source_buffer;
-		std::vector<BufferAllocation> vertex_out_buffers;
+		GPUTexture rest_isogradfield;
+		std::vector<GPUTexture> part_isogradfields;
 
+		// Per frame animation data
+		std::vector<BufferAllocation> vertex_out_buffers;
+		std::vector<BufferAllocation> sampled_bone_buffers;
+		std::vector<GPUTexture> transformed_isogradfields;
 		std::vector<vk::DescriptorSet> skinning_descriptor_sets;
 
+		glm::ivec3 field_dims;
+
+		Skeleton* skeleton;
 
 		size_t vertex_count{ 0 };
+		float isofield_scale;
 
 		MeshId out_mesh_id{ 0 };
 	};
 
 	std::vector<InternalSkeletalMesh> skeletal_meshes;
 
-	ComputePipeline<SkinningContext, VertexBuffer, SkeletalVertexBuffer> skinning_pipeline;
+	ElasticSkinning::SkinningComputePipeline skinning_pipeline;
+	std::unique_ptr<ElasticFieldComposer> field_composer;
 
 	Camera* current_camera{ nullptr };
 
 	vk::CommandPool command_pool;
 	std::vector<vk::CommandBuffer> primary_render_command_buffers;
+	std::vector<vk::CommandBuffer> elastic_skinning_composition_command_buffers;
+	std::vector<vk::CommandBuffer> elastic_skinning_animate_command_buffers;
 	bool are_command_buffers_recorded{ false };
 
 };

@@ -99,12 +99,58 @@ struct SkeletalVertex {
 	}
 };
 
+struct ElasticVertex {
+	alignas(16) glm::vec3 position;
+	alignas(16) glm::vec3 normal;
+	alignas(16) glm::vec3 color;
+	alignas(8) glm::vec2 texcoords;
+	alignas(4) uint32_t bone;
+	alignas(4) float isovalue;
+
+	static vk::VertexInputBindingDescription binding_description() {
+		vk::VertexInputBindingDescription retval;
+
+		retval.binding = 0;
+		retval.stride = sizeof(ElasticVertex);
+		retval.inputRate = vk::VertexInputRate::eVertex;
+
+		return retval;
+	}
+
+	static std::vector<vk::VertexInputAttributeDescription> attribute_description() {
+		BEGIN_DESCRIPTIONS(ElasticVertex);
+		DESCRIPTION(position);
+		DESCRIPTION(normal);
+		DESCRIPTION(color);
+		DESCRIPTION(texcoords);
+		DESCRIPTION(bone);
+		DESCRIPTION(isovalue);
+		END_DESCRIPTIONS();
+	}
+};
+
 #undef BEGIN_DESCRIPTIONS
 #undef DESCRIPTION
 #undef END_DESCRIPTIONS
 
-struct SkinningContext {
-	uint32_t vertex_count;
+struct ElasticVertexBuffer {
+	ElasticVertex vertex;
+
+	static constexpr StringHash name() {
+		return CRC::crc64("ElasticVertex");
+	}
+
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
+		vk::DescriptorSetLayoutBinding retval;
+
+		retval.binding = 1;
+		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
+		retval.descriptorCount = 1;
+		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
+		retval.pImmutableSamplers = nullptr;
+
+		return retval;
+	}
 };
 
 struct SkeletalVertexBuffer {
@@ -117,7 +163,7 @@ struct SkeletalVertexBuffer {
 	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
 
-		retval.binding = 0;
+		retval.binding = 1;
 		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
 		retval.descriptorCount = 1;
 		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
@@ -137,7 +183,7 @@ struct VertexBuffer {
 	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
 
-		retval.binding = 1;
+		retval.binding = 2;
 		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
 		retval.descriptorCount = 1;
 		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
@@ -173,3 +219,4 @@ struct MeshBase {
 
 using Mesh = MeshBase<Vertex, uint32_t>;
 using SkeletalMesh = MeshBase<SkeletalVertex, uint32_t>;
+using ElasticMesh = MeshBase<ElasticVertex, uint32_t>;
