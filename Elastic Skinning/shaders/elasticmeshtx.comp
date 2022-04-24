@@ -49,7 +49,7 @@ void main() {
 			float isoval = isograd.x;
 			vec3 gradient = isograd.yzw;
 
-			vec3 dir = (-gradient) / (dot(gradient, gradient));
+			vec3 dir = (-gradient);// / (dot(gradient, gradient));
 
 			outVert.position = outVert.position - (SIGMA * (isoval - restisoval) * dir);
 		}

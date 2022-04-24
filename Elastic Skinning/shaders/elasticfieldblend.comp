@@ -64,6 +64,7 @@ void main() {
 
 	vec4 outVal = vec4(mix(unionres, blendres, interp), gradOut);
 	
+	
 	/*
 	vec4 unionres = isogradA;
 	

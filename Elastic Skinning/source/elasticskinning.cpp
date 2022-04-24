@@ -513,7 +513,8 @@ float hrbf_compact_map(float x, float r) {
 }
 
 float hrbf_gradient_compact_map(float x, float r) {
-	if (x > -r && x < r) {
+	// Paper says -r < x < r but this doesn't match the original function's domains
+	if ((std::abs(x) - r) > FLT_EPSILON) {
 		return 0.0f;
 	}
 
@@ -785,6 +786,10 @@ namespace ElasticSkinning {
 						glm::vec3 grad_f_x = hrbf_gradient(point, out[name].centers, constants);
 						float tr_f_x = hrbf_compact_map(f_x, maxDist);
 						float dtr_f_x = hrbf_gradient_compact_map(f_x, maxDist);
+
+						if (tr_f_x > 0.0f) {
+							LOG("");
+						}
 
 						out[name].isofield.valref(x, y, z) = tr_f_x;
 						out[name].gradients.valref(x, y, z) = dtr_f_x * grad_f_x;
