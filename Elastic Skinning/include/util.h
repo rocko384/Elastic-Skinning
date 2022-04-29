@@ -6,6 +6,7 @@
 #include <vector>
 #include <array>
 #include <string_view>
+#include <algorithm>
 #include <iterator>
 #include <concepts>
 #include <type_traits>
@@ -102,6 +103,15 @@ inline constexpr uint64_t hash_combine(Ts... hashes) {
 
 	return ret;
 }
+
+template <size_t N>
+struct StringLiteral {
+	constexpr StringLiteral(const char(&str)[N]) {
+		std::copy(str, str + N, value);
+	}
+
+	char value[N];
+};
 
 template <typename T>
 concept ArrayType =

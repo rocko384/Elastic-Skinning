@@ -14,6 +14,7 @@ const std::string APP_NAME{ "Elastic Skinning" };
 int main(int argc, char** argv) {
 	Window window(APP_NAME, true);
 	GfxContext context(&window, APP_NAME);
+
 	Renderer<ModelBuffer, CameraBuffer, ColorSampler> renderer(&context);
 
 	GfxPipeline<Vertex, ModelBuffer, CameraBuffer, ColorSampler> base_pipeline;

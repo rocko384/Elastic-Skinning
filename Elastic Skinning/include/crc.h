@@ -6,19 +6,19 @@
 
 namespace CRC {
 	template <typename T>
-	T crc_polynomial;
+	static const T crc_polynomial;
 
 	template<>
-	uint64_t crc_polynomial<uint64_t> = 0x42F0E1EBA9EA3693;
+	static const uint64_t crc_polynomial<uint64_t> = 0x42F0E1EBA9EA3693;
 
 	template<>
-	uint32_t crc_polynomial<uint32_t> = 0x04C11DB7;
+	static const uint32_t crc_polynomial<uint32_t> = 0x04C11DB7;
 
 	template<>
-	uint16_t crc_polynomial<uint16_t> = 0x2F15;
+	static const uint16_t crc_polynomial<uint16_t> = 0x2F15;
 
 	template <typename T>
-	T high_bit = T(1) << ((sizeof(T) * 8) - 1);
+	static const T high_bit = T(1) << ((sizeof(T) * 8) - 1);
 
 	template <typename T>
 	constexpr T bit_reflect(T in) {

@@ -3,7 +3,6 @@
 #include "util.h"
 #include "animation.h"
 
-#include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -15,26 +14,6 @@ struct Bone {
 	alignas(16) glm::quat rotation;
 	alignas(16) glm::vec3 position;
 	alignas(16) glm::vec3 scale;
-};
-
-struct BoneBuffer {
-	Bone bone;
-
-	static constexpr StringHash name() {
-		return CRC::crc64("Bone");
-	}
-
-	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-		vk::DescriptorSetLayoutBinding retval;
-
-		retval.binding = 0;
-		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
-		retval.descriptorCount = 1;
-		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-		retval.pImmutableSamplers = nullptr;
-
-		return retval;
-	}
 };
 
 struct BoneRelationship {

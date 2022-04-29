@@ -919,8 +919,8 @@ void RendererImpl::update_frame_data(Swapchain::FrameId ImageIdx) {
 			CameraBuffer camera{ glm::mat4(1.0f), glm::mat4(1.0f) };
 
 			if (current_camera != nullptr) {
-				camera.projection = current_camera->projection;
-				camera.view = current_camera->view, glm::vec3{ 1.0f, 1.0f, 1.0f };
+				camera.data.projection = current_camera->projection;
+				camera.data.view = current_camera->view, glm::vec3{ 1.0f, 1.0f, 1.0f };
 			}
 
 			size_t transferSize = sizeof(CameraBuffer);

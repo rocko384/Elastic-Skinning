@@ -8,6 +8,22 @@
 #include <vector>
 #include <unordered_map>
 
+namespace Compute {
+
+	template <typename Data, uint32_t Binding, uint32_t Count = 1>
+	using UniformBuffer = ::UniformBuffer<"", Data, Binding, vk::ShaderStageFlagBits::eCompute, Count>;
+	
+	template <typename Data, uint32_t Binding, uint32_t Count = 1>
+	using StorageBuffer = ::StorageBuffer<"", Data, Binding, vk::ShaderStageFlagBits::eCompute, Count>;
+
+	template <uint32_t Binding, uint32_t Count = 1>
+	using StorageImage = ::StorageImage<"", Binding, vk::ShaderStageFlagBits::eCompute, Count>;
+
+	template <uint32_t Binding, uint32_t Count = 1>
+	using ImageSampler = ::ImageSampler<"", Binding, vk::ShaderStageFlagBits::eCompute, Count>;
+
+}
+
 struct ComputePipelineImpl {
 
 	enum class Error {
@@ -36,7 +52,7 @@ struct ComputePipelineImpl {
 	vk::PipelineLayout pipeline_layout;
 	vk::Pipeline pipeline;
 
-	std::unordered_map<StringHash, vk::DescriptorSetLayoutBinding> descriptor_layout_bindings;
+	std::vector<vk::DescriptorSetLayoutBinding> descriptor_layout_bindings;
 	vk::PushConstantRange context_push_constant;
 
 	std::filesystem::path shader_path;
@@ -56,11 +72,8 @@ struct ComputePipeline : ComputePipelineImpl {
 		std::vector<StringHash> names = { (Descriptors::name())... };
 		std::vector<vk::DescriptorSetLayoutBinding> bindings = { (Descriptors::layout_binding())... };
 
-		for (size_t i = 0; i < names.size(); i++) {
-			descriptor_layout_bindings[names[i]] = bindings[i];
-		}
+		descriptor_layout_bindings = bindings;
 
 		context_push_constant = { vk::ShaderStageFlagBits::eCompute, 0, sizeof(ContextDataT) };
 	}
-
 };

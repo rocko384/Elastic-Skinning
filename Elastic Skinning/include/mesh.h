@@ -40,7 +40,7 @@ std::is_standard_layout_v<T> &&
 	_ret_val[_desc_index].offset = offsetof(_Desc_Parent_T, Member); \
 	_desc_index++
 
-#define END_DESCRIPTIONS(_) \
+#define END_DESCRIPTIONS \
 	return _ret_val
 
 struct Vertex {
@@ -65,7 +65,7 @@ struct Vertex {
 		DESCRIPTION(normal);
 		DESCRIPTION(color);
 		DESCRIPTION(texcoords);
-		END_DESCRIPTIONS();
+		END_DESCRIPTIONS;
 	}
 };
 
@@ -95,7 +95,7 @@ struct SkeletalVertex {
 		DESCRIPTION(normal);
 		DESCRIPTION(color);
 		DESCRIPTION(texcoords);
-		END_DESCRIPTIONS();
+		END_DESCRIPTIONS;
 	}
 };
 
@@ -125,7 +125,7 @@ struct ElasticVertex {
 		DESCRIPTION(texcoords);
 		DESCRIPTION(bone);
 		DESCRIPTION(isovalue);
-		END_DESCRIPTIONS();
+		END_DESCRIPTIONS;
 	}
 };
 
@@ -133,65 +133,9 @@ struct ElasticVertex {
 #undef DESCRIPTION
 #undef END_DESCRIPTIONS
 
-struct ElasticVertexBuffer {
-	ElasticVertex vertex;
-
-	static constexpr StringHash name() {
-		return CRC::crc64("ElasticVertex");
-	}
-
-	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-		vk::DescriptorSetLayoutBinding retval;
-
-		retval.binding = 1;
-		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
-		retval.descriptorCount = 1;
-		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-		retval.pImmutableSamplers = nullptr;
-
-		return retval;
-	}
-};
-
-struct SkeletalVertexBuffer {
-	SkeletalVertex vertex;
-
-	static constexpr StringHash name() {
-		return CRC::crc64("SkeletalVertex");
-	}
-
-	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-		vk::DescriptorSetLayoutBinding retval;
-
-		retval.binding = 1;
-		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
-		retval.descriptorCount = 1;
-		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-		retval.pImmutableSamplers = nullptr;
-
-		return retval;
-	}
-};
-
-struct VertexBuffer {
-	Vertex vertex;
-
-	static constexpr StringHash name() {
-		return CRC::crc64("Vertex");
-	}
-
-	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-		vk::DescriptorSetLayoutBinding retval;
-
-		retval.binding = 2;
-		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
-		retval.descriptorCount = 1;
-		retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-		retval.pImmutableSamplers = nullptr;
-
-		return retval;
-	}
-};
+using ElasticVertexBuffer = StorageBuffer<"", ElasticVertex, 1, vk::ShaderStageFlagBits::eCompute, 1>;
+using SkeletalVertexBuffer = StorageBuffer<"", SkeletalVertex, 1, vk::ShaderStageFlagBits::eCompute, 1>;
+using VertexBuffer = StorageBuffer<"", Vertex, 2, vk::ShaderStageFlagBits::eCompute, 1>;
 
 template <typename T>
 concept MeshType =

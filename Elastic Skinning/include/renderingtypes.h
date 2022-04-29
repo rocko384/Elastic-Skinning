@@ -105,6 +105,7 @@ concept BufferObjectType =
 	std::is_trivial_v<T> &&
 	std::is_standard_layout_v<T> &&
 	requires {
+		typename T::DataType;
 		{T::is_per_mesh()} -> BooleanTestable;
 	};
 
@@ -117,17 +118,16 @@ concept DescriptorType =
 		{T::layout_binding()} -> std::same_as<vk::DescriptorSetLayoutBinding>;
 	};
 
-/// TODO: Reconsider the descriptor defintion pattern
-/// Maybe something like 'struct DescriptorDef<size_t Binding, size_t Count, enum Type, flags Stages>'
-/// Specialized to, t.d.: 'struct ComputeBuffer<size_t Binding> = DescriptorDef<size_t Binding, size_t 1, enum Storage, flags Compute>'
-/// t.d.: 'struct VertexUniform<size_t Binding>', or just 'struct Uniform<size_t Binding, flags Stages>'
-/// REMINDER: The names are there to allow for compatibility comparison between a renderer and pipeline,
-/// even though this isn't being done yet. Would have to reconsider how to do this (compatibility comparison)
-/// if this change is made.
 
-template <typename Data, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+template <StringLiteral Name, typename Data, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
 struct UniformBuffer {
-	using DataType = Data;
+	typedef Data DataType;
+
+	DataType data;
+
+	static constexpr StringHash name() {
+		return CRC::crc64(Name.value);
+	}
 
 	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
@@ -146,9 +146,15 @@ struct UniformBuffer {
 	}
 };
 
-template <typename Data, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+template <StringLiteral Name, typename Data, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
 struct StorageBuffer {
-	using DataType = Data;
+	typedef Data DataType;
+
+	DataType data;
+
+	static constexpr StringHash name() {
+		return CRC::crc64(Name.value);
+	}
 
 	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
@@ -167,8 +173,13 @@ struct StorageBuffer {
 	}
 };
 
-template <uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+template <StringLiteral Name, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
 struct StorageImage {
+
+	static constexpr StringHash name() {
+		return CRC::crc64(Name.value);
+	}
+
 	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
 
@@ -182,8 +193,13 @@ struct StorageImage {
 	}
 };
 
-template <uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+template <StringLiteral Name, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
 struct ImageSampler {
+
+	static constexpr StringHash name() {
+		return CRC::crc64(Name.value);
+	}
+
 	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
 		vk::DescriptorSetLayoutBinding retval;
 
@@ -197,29 +213,7 @@ struct ImageSampler {
 	}
 };
 
-struct ModelBuffer {
-	glm::mat4 model;
-
-	static constexpr StringHash name() {
-		return CRC::crc64("Model");
-	}
-
-	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-		vk::DescriptorSetLayoutBinding retval;
-
-		retval.binding = 0;
-		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
-		retval.descriptorCount = 1;
-		retval.stageFlags = vk::ShaderStageFlagBits::eVertex;
-		retval.pImmutableSamplers = nullptr;
-
-		return retval;
-	}
-
-	static constexpr bool is_per_mesh() {
-		return layout_binding().descriptorType == vk::DescriptorType::eStorageBuffer;
-	}
-};
+using ModelBuffer = StorageBuffer<"Model", glm::mat4, 0, vk::ShaderStageFlagBits::eVertex, 1>;
 
 #define NO_CAMERA nullptr
 
@@ -236,45 +230,6 @@ struct Camera {
 	}
 };
 
-struct CameraBuffer {
-	glm::mat4 view;
-	glm::mat4 projection;
+using CameraBuffer = UniformBuffer<"Camera", Camera, 1, vk::ShaderStageFlagBits::eVertex, 1>;
 
-	static constexpr StringHash name() {
-		return CRC::crc64("Camera");
-	}
-
-	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-		vk::DescriptorSetLayoutBinding retval;
-
-		retval.binding = 1;
-		retval.descriptorType = vk::DescriptorType::eUniformBuffer;
-		retval.descriptorCount = 1;
-		retval.stageFlags = vk::ShaderStageFlagBits::eVertex;
-		retval.pImmutableSamplers = nullptr;
-
-		return retval;
-	}
-
-	static constexpr bool is_per_mesh() {
-		return layout_binding().descriptorType == vk::DescriptorType::eStorageBuffer;
-	}
-};
-
-struct ColorSampler {
-	static constexpr StringHash name() {
-		return CRC::crc64("Color");
-	}
-
-	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-		vk::DescriptorSetLayoutBinding retval;
-
-		retval.binding = 0;
-		retval.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		retval.descriptorCount = 1;
-		retval.stageFlags = vk::ShaderStageFlagBits::eFragment;
-		retval.pImmutableSamplers = nullptr;
-
-		return retval;
-	}
-};
+using ColorSampler = ImageSampler<"Color", 0, vk::ShaderStageFlagBits::eFragment, 1>;

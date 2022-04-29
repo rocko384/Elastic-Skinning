@@ -8,26 +8,11 @@
 #include <unordered_map>
 #include <vector>
 
+using BoneBuffer = Compute::StorageBuffer<Bone, 0>;
+
 namespace ElasticSkinning {
 
-	struct CurrentIsogradfieldSampler {
-
-		static constexpr StringHash name() {
-			return CRC::crc64("CurrentIsogradfieldSampler");
-		}
-
-		static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-			vk::DescriptorSetLayoutBinding retval;
-
-			retval.binding = 3;
-			retval.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-			retval.descriptorCount = 1;
-			retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-			retval.pImmutableSamplers = nullptr;
-
-			return retval;
-		}
-	};
+	using CurrentIsogradfieldSampler = Compute::ImageSampler<3>;
 
 	struct SkinningContext {
 		uint32_t vertex_count;
@@ -38,81 +23,10 @@ namespace ElasticSkinning {
 
 	using SkinningComputePipeline = ComputePipeline<SkinningContext, VertexBuffer, ElasticVertexBuffer, BoneBuffer, CurrentIsogradfieldSampler>;
 
-	struct IsogradfieldSourceBuffer {
-
-		static constexpr StringHash name() {
-			return CRC::crc64("IsogradfieldSource");
-		}
-
-		static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-			vk::DescriptorSetLayoutBinding retval;
-
-			retval.binding = 1;
-			retval.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-			retval.descriptorCount = 1;
-			retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-			retval.pImmutableSamplers = nullptr;
-
-			return retval;
-		}
-	};
-
-	struct IsogradfieldABuffer {
-		
-		static constexpr StringHash name() {
-			return CRC::crc64("IsogradfieldA");
-		}
-
-		static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-			vk::DescriptorSetLayoutBinding retval;
-
-			retval.binding = 1;
-			retval.descriptorType = vk::DescriptorType::eStorageImage;
-			retval.descriptorCount = 1;
-			retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-			retval.pImmutableSamplers = nullptr;
-
-			return retval;
-		}
-	};
-
-	struct IsogradfieldBBuffer {
-
-		static constexpr StringHash name() {
-			return CRC::crc64("IsogradfieldB");
-		}
-
-		static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-			vk::DescriptorSetLayoutBinding retval;
-
-			retval.binding = 2;
-			retval.descriptorType = vk::DescriptorType::eStorageImage;
-			retval.descriptorCount = 1;
-			retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-			retval.pImmutableSamplers = nullptr;
-
-			return retval;
-		}
-	};
-
-	struct IsogradfieldOutBuffer {
-
-		static constexpr StringHash name() {
-			return CRC::crc64("IsogradfieldOut");
-		}
-
-		static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
-			vk::DescriptorSetLayoutBinding retval;
-
-			retval.binding = 3;
-			retval.descriptorType = vk::DescriptorType::eStorageImage;
-			retval.descriptorCount = 1;
-			retval.stageFlags = vk::ShaderStageFlagBits::eCompute;
-			retval.pImmutableSamplers = nullptr;
-
-			return retval;
-		}
-	};
+	using IsogradfieldSourceBuffer = Compute::ImageSampler<1>;
+	using IsogradfieldABuffer = Compute::StorageImage<1>;
+	using IsogradfieldBBuffer = Compute::StorageImage<2>;
+	using IsogradfieldOutBuffer = Compute::StorageImage<3>;
 
 	struct FieldTxContext {
 		uint32_t bone_idx;

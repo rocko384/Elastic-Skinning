@@ -28,11 +28,7 @@ ComputePipelineImpl::Error ComputePipelineImpl::init(GfxContext* Context) {
 	shaderInfo.pSpecializationInfo = nullptr;
 
 	// Descriptor set layouts
-	std::vector<vk::DescriptorSetLayoutBinding> bufferLayoutBindings;
-
-	for (auto& binding : descriptor_layout_bindings) {
-		bufferLayoutBindings.push_back(binding.second);
-	}
+	std::vector<vk::DescriptorSetLayoutBinding> bufferLayoutBindings = descriptor_layout_bindings;
 
 	vk::DescriptorSetLayoutCreateInfo bufferDescriptorLayoutInfo;
 	bufferDescriptorLayoutInfo.bindingCount = bufferLayoutBindings.size();
