@@ -261,14 +261,9 @@ public:
 
 private:
 
-	template <BufferObjectType T>
+	template <DescriptorType T>
 	bool is_per_mesh_impl() {
-		return T::is_per_mesh();
-	}
-
-	template <SamplerType T>
-	bool is_per_mesh_impl() {
-		return false;
+		return T::layout_binding().descriptorType == vk::DescriptorType::eStorageBuffer;
 	}
 
 };

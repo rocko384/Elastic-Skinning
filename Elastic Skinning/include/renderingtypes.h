@@ -113,9 +113,7 @@ concept SamplerType = !BufferObjectType<T>;
 
 template <typename T>
 concept DescriptorType =
-	(BufferObjectType<T> || SamplerType<T>) &&
 	requires {
-		{T::name()} -> std::same_as<StringHash>;
 		{T::layout_binding()} -> std::same_as<vk::DescriptorSetLayoutBinding>;
 	};
 
@@ -126,6 +124,78 @@ concept DescriptorType =
 /// REMINDER: The names are there to allow for compatibility comparison between a renderer and pipeline,
 /// even though this isn't being done yet. Would have to reconsider how to do this (compatibility comparison)
 /// if this change is made.
+
+template <typename Data, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+struct UniformBuffer {
+	using DataType = Data;
+
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
+		vk::DescriptorSetLayoutBinding retval;
+
+		retval.binding = Binding;
+		retval.descriptorType = vk::DescriptorType::eUniformBuffer;
+		retval.descriptorCount = Count;
+		retval.stageFlags = Stage;
+		retval.pImmutableSamplers = nullptr;
+
+		return retval;
+	}
+
+	static constexpr bool is_per_mesh() {
+		return false;
+	}
+};
+
+template <typename Data, uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+struct StorageBuffer {
+	using DataType = Data;
+
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
+		vk::DescriptorSetLayoutBinding retval;
+
+		retval.binding = Binding;
+		retval.descriptorType = vk::DescriptorType::eStorageBuffer;
+		retval.descriptorCount = Count;
+		retval.stageFlags = Stage;
+		retval.pImmutableSamplers = nullptr;
+
+		return retval;
+	}
+
+	static constexpr bool is_per_mesh() {
+		return true;
+	}
+};
+
+template <uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+struct StorageImage {
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
+		vk::DescriptorSetLayoutBinding retval;
+
+		retval.binding = Binding;
+		retval.descriptorType = vk::DescriptorType::eStorageImage;
+		retval.descriptorCount = Count;
+		retval.stageFlags = Stage;
+		retval.pImmutableSamplers = nullptr;
+
+		return retval;
+	}
+};
+
+template <uint32_t Binding, vk::ShaderStageFlagBits Stage, uint32_t Count = 1>
+struct ImageSampler {
+	static constexpr vk::DescriptorSetLayoutBinding layout_binding() {
+		vk::DescriptorSetLayoutBinding retval;
+
+		retval.binding = Binding;
+		retval.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		retval.descriptorCount = Count;
+		retval.stageFlags = Stage;
+		retval.pImmutableSamplers = nullptr;
+
+		return retval;
+	}
+};
 
 struct ModelBuffer {
 	glm::mat4 model;
